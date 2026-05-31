@@ -17,11 +17,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Map<String, dynamic> _data = {};
   bool _isLoading = true;
   String _error = '';
+  String _userName = 'Administrator';
 
   @override
   void initState() {
     super.initState();
+    _loadUserName();
     _loadDashboard();
+  }
+
+  Future<void> _loadUserName() async {
+    final name = await _api.getUserName();
+    if (!mounted) return;
+    setState(() => _userName = name?.isNotEmpty == true ? name! : 'Administrator');
   }
 
   Future<void> _loadDashboard() async {
@@ -62,31 +70,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return 0;
   }
 
- // Di dalam class _DashboardScreenState, ganti method _onSidebarItemSelected:
-void _onSidebarItemSelected(int index) {
-  switch (index) {
-    case 0:
-      // sudah di dashboard
-      break;
-    case 1:
-      Navigator.pushNamed(context, '/pulsa-provider');
-      break;
-    case 2:
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Fitur Riwayat segera hadir')),
-      );
-      break;
-    case 3:
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Fitur User segera hadir')),
-      );
-      break;
+  void _onSidebarItemSelected(int index) async {
+    final roleId = await _api.getUserRole();
+    switch (index) {
+      case 0:
+        // sudah di dashboard
+        break;
+      case 1:
+        Navigator.pushReplacementNamed(context, '/pulsa-provider');
+        break;
+      case 2:
+        Navigator.pushReplacementNamed(context, '/topup-saldo');
+        break;
+      case 3:
+        Navigator.pushReplacementNamed(context, '/scan-pulsa');
+        break;
+      case 4:
+        if (roleId == 2) {
+          Navigator.pushReplacementNamed(context, '/user');
+        }
+        break;
+      case 5:
+        if (roleId == 2) {
+          Navigator.pushReplacementNamed(context, '/history');
+        }
+        break;
     default:
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Fitur belum tersedia')),
       );
   }
 }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -118,7 +133,7 @@ void _onSidebarItemSelected(int index) {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Halo, Administrator!', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                              Text('Halo, $_userName!', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                               const SizedBox(height: 8),
                               Text('Ringkasan bisnis Anda hari ini', style: TextStyle(color: Colors.grey.shade600)),
                               const SizedBox(height: 24),

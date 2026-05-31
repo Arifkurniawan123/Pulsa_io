@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import '../services/api_service.dart';
+import '../models/provider_pulsa.dart';
+import '../widgets/custom_sidebar.dart';
 import 'pulsa_product_screen.dart';
 
 class PulsaProviderScreen extends StatefulWidget {
@@ -12,52 +14,51 @@ class PulsaProviderScreen extends StatefulWidget {
 
 class _PulsaProviderScreenState extends State<PulsaProviderScreen> {
   final ApiService _api = ApiService();
-  List<String> _brands = [];
+  List<ProviderPulsa> _providers = [];
   bool _isLoading = true;
   String _error = '';
+  int _userRole = 0;
 
   @override
   void initState() {
     super.initState();
+    _loadUserRole();
     _fetchProviders();
   }
 
-  Future<void> _fetchProviders({bool forceRefresh = false}) async {
+  Future<void> _loadUserRole() async {
+    final roleId = await _api.getUserRole();
     if (!mounted) return;
-    setState(() => _isLoading = true);
+    setState(() {
+      _userRole = roleId ?? 0;
+    });
+  }
+
+  Future<void> _fetchProviders() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoading = true;
+      _error = '';
+    });
     try {
-      final response = await _api.getDigiflazzPricelist(forceRefresh: forceRefresh);
-      if (response.statusCode == 200 && response.data != null) {
-        final dynamic data = response.data['data'];
-        // Cek apakah response berupa error limitasi (rc 83)
-        if (data is Map && data.containsKey('rc') && data['rc'] == '83') {
-          setState(() {
-            _error = 'Server sibuk, coba beberapa saat lagi.';
-            _isLoading = false;
-          });
-          return;
-        }
-        final List products = data is List ? data : [];
-        final pulsaProducts = products.where((p) =>
-            p['category'] == 'Pulsa' && p['buyer_product_status'] == true);
-        final brands = pulsaProducts.map((p) => p['brand'] as String).toSet().toList();
-        if (mounted) {
-          setState(() {
-            _brands = brands;
-            _isLoading = false;
-            _error = '';
-          });
-        }
+      final response = await _api.getProviders();
+      if (response.statusCode == 200 && response.data['success'] == true) {
+        final List raw = response.data['data'] as List;
+        setState(() {
+          _providers = raw.map((e) => ProviderPulsa.fromJson(e)).toList();
+          _isLoading = false;
+        });
       } else {
-        if (mounted) {
-          setState(() {
-            _error = 'Gagal mengambil data provider';
-            _isLoading = false;
-          });
-        }
+        setState(() {
+          _error = response.data['message'] ?? 'Gagal mengambil data provider';
+          _isLoading = false;
+        });
       }
     } on DioException catch (e) {
-      if (mounted) {
+      if (e.response?.statusCode == 401) {
+        await _api.clearToken();
+        if (mounted) Navigator.pushReplacementNamed(context, '/login');
+      } else {
         setState(() {
           _error = 'Koneksi gagal: ${e.message}';
           _isLoading = false;
@@ -66,35 +67,86 @@ class _PulsaProviderScreenState extends State<PulsaProviderScreen> {
     }
   }
 
+  void _onSidebarItemSelected(int index) async {
+    final roleId = await _api.getUserRole();
+    switch (index) {
+      case 0:
+        if (roleId == 2) Navigator.pushReplacementNamed(context, '/dashboard');
+        else Navigator.pushReplacementNamed(context, '/kasir');
+        break;
+      case 1:
+        // sudah di halaman ini
+        break;
+      case 2:
+        Navigator.pushReplacementNamed(context, '/topup-saldo');
+        break;
+      case 3:
+        Navigator.pushReplacementNamed(context, '/scan-pulsa');
+        break;
+      case 4:
+        if (roleId == 2) {
+          Navigator.pushReplacementNamed(context, '/user');
+        } else {
+          Navigator.pushReplacementNamed(context, '/history');
+        }
+        break;
+      case 5:
+        if (roleId == 2) {
+          Navigator.pushReplacementNamed(context, '/history');
+        }
+        break;
+      default:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Fitur belum tersedia')),
+        );
+    }
+  }
   @override
   Widget build(BuildContext context) {
+    const selectedIndex = 1;
+
     return Scaffold(
+      drawer: CustomSidebar(selectedIndex: selectedIndex, onItemSelected: _onSidebarItemSelected),
       appBar: AppBar(title: const Text('Pilih Provider Pulsa')),
       body: RefreshIndicator(
-        onRefresh: () => _fetchProviders(forceRefresh: true),
+        onRefresh: _fetchProviders,
         child: _isLoading
             ? const Center(child: CircularProgressIndicator())
             : _error.isNotEmpty
-                ? Center(child: Text(_error))
-                : _brands.isEmpty
-                    ? const Center(child: Text('Tidak ada provider pulsa'))
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(_error),
+                        const SizedBox(height: 16),
+                        ElevatedButton(
+                          onPressed: _fetchProviders,
+                          child: const Text('Coba Lagi'),
+                        ),
+                      ],
+                    ),
+                  )
+                : _providers.isEmpty
+                    ? const Center(child: Text('Tidak ada provider tersedia'))
                     : ListView.builder(
-                        itemCount: _brands.length,
+                        padding: const EdgeInsets.all(16),
+                        itemCount: _providers.length,
                         itemBuilder: (context, index) {
-                          final brand = _brands[index];
+                          final p = _providers[index];
                           return Card(
-                            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            margin: const EdgeInsets.only(bottom: 12),
                             child: ListTile(
                               leading: const Icon(Icons.sim_card),
-                              title: Text(brand),
+                              title: Text(p.namaProvider),
+                              subtitle: Text(p.kodeProvider),
                               trailing: const Icon(Icons.chevron_right),
                               onTap: () {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
                                     builder: (_) => PulsaProductScreen(
-                                      brand: brand,
-                                      category: 'Pulsa',
+                                      providerId: p.id,
+                                      namaProvider: p.namaProvider,
                                     ),
                                   ),
                                 );

@@ -1,7 +1,7 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 
-class CustomSidebar extends StatelessWidget {
+class CustomSidebar extends StatefulWidget {
   final int selectedIndex;
   final Function(int) onItemSelected;
 
@@ -10,6 +10,29 @@ class CustomSidebar extends StatelessWidget {
     required this.selectedIndex,
     required this.onItemSelected,
   });
+
+  @override
+  State<CustomSidebar> createState() => _CustomSidebarState();
+}
+
+class _CustomSidebarState extends State<CustomSidebar> {
+  late Future<Map<String, dynamic>> _userFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _userFuture = _loadUserData();
+  }
+
+  Future<Map<String, dynamic>> _loadUserData() async {
+    final api = ApiService();
+    final roleId = await api.getUserRole() ?? 0;
+    final userName = await api.getUserName() ?? '';
+    return {
+      'role_id': roleId,
+      'user_name': userName,
+    };
+  }
 
   Future<void> _logout(BuildContext context) async {
     final confirm = await showDialog<bool>(
@@ -34,43 +57,70 @@ class CustomSidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Drawer(
-      child: Column(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 20),
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(colors: [Color(0xFF6366f1), Color(0xFF8B5CF6)]),
-            ),
-            child: Column(
-              children: const [
-                Icon(Icons.store, size: 50, color: Colors.white),
-                SizedBox(height: 10),
-                Text('Pulsa IO', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-                Text('Admin Panel', style: TextStyle(fontSize: 12, color: Colors.white70)),
-              ],
-            ),
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _userFuture,
+      builder: (context, snapshot) {
+        final roleId = snapshot.data?['role_id'] ?? 0;
+        final userName = snapshot.data?['user_name'] ?? '';
+        final isAdmin = roleId == 2;
+        final roleLabel = isAdmin ? 'Administrator' : 'Kasir';
+        final menuItems = [
+          {'icon': Icons.dashboard, 'title': isAdmin ? 'Dashboard' : ''},
+          {'icon': Icons.mobile_friendly, 'title': 'Pulsa Reguler'},
+          {'icon': Icons.account_balance_wallet, 'title': 'Top-up Saldo'},
+          {'icon': Icons.qr_code_scanner, 'title': 'Scan Pulsa'},
+          if (isAdmin) {'icon': Icons.person_add, 'title': 'Pengguna'},
+          {'icon': Icons.history, 'title': 'Riwayat'},
+        ];
+
+        return Drawer(
+          child: Column(
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 20),
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(colors: [Color(0xFF6366f1), Color(0xFF8B5CF6)]),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.store, size: 50, color: Colors.white),
+                    const SizedBox(height: 10),
+                    const Text('Pulsa IO', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                    const SizedBox(height: 6),
+                    Text(userName.isNotEmpty ? userName : 'Selamat datang', style: const TextStyle(fontSize: 14, color: Colors.white70)),
+                    const SizedBox(height: 4),
+                    Text(roleLabel, style: const TextStyle(fontSize: 12, color: Colors.white70)),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: menuItems.length + 1,
+                  itemBuilder: (context, index) {
+                    if (index == menuItems.length) {
+                      return Column(
+                        children: [
+                          const Divider(),
+                          _buildMenuItem(Icons.logout, 'Logout', index, context, isLogout: true),
+                        ],
+                      );
+                    }
+                    final item = menuItems[index];
+                    return _buildMenuItem(item['icon'] as IconData, item['title'] as String, index, context);
+                  },
+                ),
+              ),
+            ],
           ),
-          Expanded(
-            child: ListView(
-              children: [
-                _buildMenuItem(Icons.dashboard, 'Dashboard', 0, context),
-                _buildMenuItem(Icons.mobile_friendly, 'Pulsa Reguler', 1, context),
-                _buildMenuItem(Icons.history, 'Riwayat', 2, context),
-                _buildMenuItem(Icons.people, 'User', 3, context),
-                const Divider(),
-                _buildMenuItem(Icons.logout, 'Logout', 4, context, isLogout: true),
-              ],
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
   Widget _buildMenuItem(IconData icon, String title, int index, BuildContext context, {bool isLogout = false}) {
-    final isSelected = selectedIndex == index;
+    final isSelected = widget.selectedIndex == index;
     return ListTile(
       leading: Icon(icon, color: isLogout ? Colors.red : (isSelected ? const Color(0xFF6366f1) : Colors.grey.shade600)),
       title: Text(
@@ -85,7 +135,7 @@ class CustomSidebar extends StatelessWidget {
         if (isLogout) {
           _logout(context);
         } else {
-          onItemSelected(index);
+          widget.onItemSelected(index);
         }
       },
     );

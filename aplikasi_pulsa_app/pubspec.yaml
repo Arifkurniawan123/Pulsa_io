@@ -10,9 +10,13 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  image_picker: ^1.0.7
   provider: ^6.1.1
   dio: ^5.4.0
   shared_preferences: ^2.2.2
+  mobile_scanner: ^7.2.0
+  excel: ^2.1.0
+  path_provider: ^2.0.15
   cupertino_icons: ^1.0.8
 
 dev_dependencies:

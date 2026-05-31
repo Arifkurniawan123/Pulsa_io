@@ -44,13 +44,16 @@ class _LoginScreenState extends State<LoginScreen> {
       
       if (response.statusCode == 200 && response.data['success'] == true) {
         final token = response.data['data']['token'];
+        final user = Map<String, dynamic>.from(response.data['data']['user'] ?? {});
+
         await _api.saveToken(token);
-        
+        await _api.saveUserInfo(user);
+
+        final roleId = user['role_id'] is int ? user['role_id'] : int.tryParse(user['role_id']?.toString() ?? '') ?? 0;
+        final routeName = roleId == 2 ? '/dashboard' : '/kasir';
+
         if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => const DashboardScreen()),
-          );
+          Navigator.pushReplacementNamed(context, routeName);
         }
       } else {
         setState(() => _error = response.data['message'] ?? 'Login gagal');
