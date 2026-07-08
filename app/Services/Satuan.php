@@ -7,31 +7,39 @@ use App\Models\Satuan as ModelsSatuan;
 class Satuan
 {
     protected $satuanModel;
+    
     public function __construct()
     {
         $this->satuanModel = new ModelsSatuan();
     }
 
-    public function getData()
+    // ================================================================
+    // GET DATA WITH SEARCH
+    // ================================================================
+    public function getData($search = null, $limit = 100, $offset = 0)
     {
         try {
-            $data = $this->satuanModel->findAll();
-            if (empty($data)) {
-                return [
-                    'success' => true,
-                    'data'    => [],
-                ];
+            $builder = $this->satuanModel;
+
+            if (!empty($search)) {
+                $builder->like('nama_satuan', $search);
             }
+
+            $total = $builder->countAllResults(false);
+            $data  = $builder->orderBy('id', 'DESC')
+                             ->findAll($limit, $offset);
 
             return [
                 'success' => true,
                 'data'    => $data,
+                'total'   => $total,
             ];
         } catch (\Throwable $th) {
             log_message('error', $th->getMessage());
             return [
                 'success' => false,
                 'data'    => [],
+                'total'   => 0,
             ];
         }
     }
@@ -67,6 +75,7 @@ class Satuan
     {
         $newData = [
             'nama_satuan' => $data['satuan'],
+            'created_at'  => date('Y-m-d H:i:s'),
         ];
 
         try {

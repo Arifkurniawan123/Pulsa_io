@@ -23,6 +23,60 @@ class Kasir extends BaseController
         return str_contains($this->request->getUri()->getPath(), 'api/');
     }
 
+    /**
+     * Ambil data dari request (support JSON dan POST)
+     */
+    private function getRequestData(): array
+    {
+        $contentType = $this->request->getHeaderLine('Content-Type');
+
+        // Jika Content-Type JSON
+        if (strpos($contentType, 'application/json') !== false) {
+            $json = $this->request->getJSON(true);
+            if (is_array($json) && !empty($json)) {
+                return $json;
+            }
+        }
+
+        // Jika Content-Type form-encode atau form-data
+        if (strpos($contentType, 'application/x-www-form-urlencoded') !== false ||
+            strpos($contentType, 'multipart/form-data') !== false) {
+            $post = $this->request->getPost();
+            if (is_array($post) && !empty($post)) {
+                return $post;
+            }
+        }
+
+        // Fallback: coba dari POST
+        $post = $this->request->getPost();
+        if (is_array($post) && !empty($post)) {
+            return $post;
+        }
+
+        // Fallback: raw input
+        $raw = $this->request->getBody();
+        if (!empty($raw)) {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded) && !empty($decoded)) {
+                return $decoded;
+            }
+            parse_str($raw, $parsed);
+            if (is_array($parsed) && !empty($parsed)) {
+                return $parsed;
+            }
+        }
+
+        return [];
+    }
+
+    private function apiResponse($success, $message, $code, $data = null, $errors = null)
+    {
+        $response = ['success' => $success, 'message' => $message, 'code' => $code];
+        if ($data !== null) $response['data'] = $data;
+        if ($errors !== null) $response['errors'] = $errors;
+        return $this->response->setStatusCode($code)->setJSON($response);
+    }
+
     public function index()
     {
         $dataProdukFisik   = $this->kasirService->getDataProdukFisik();
@@ -30,16 +84,11 @@ class Kasir extends BaseController
         $statistik         = $this->kasirService->getStatistikHarian();
 
         if ($this->isApi()) {
-            return $this->response->setStatusCode(200)->setJSON([
-                'success' => true,
-                'message' => 'Data kasir berhasil diambil',
-                'code'    => 200,
-                'data'    => [
-                    'produk_fisik'   => $dataProdukFisik['success'] ? $dataProdukFisik['data'] : [],
-                    'produk_digital' => $dataProdukDigital['success'] ? $dataProdukDigital['data'] : [],
-                    'statistik'      => $statistik['success'] ? $statistik['data'] : null,
-                    'cart'           => session()->get('kasir_cart') ?? [],
-                ],
+            return $this->apiResponse(true, 'Data kasir berhasil diambil', 200, [
+                'produk_fisik'   => $dataProdukFisik['success'] ? $dataProdukFisik['data'] : [],
+                'produk_digital' => $dataProdukDigital['success'] ? $dataProdukDigital['data'] : [],
+                'statistik'      => $statistik['success'] ? $statistik['data'] : null,
+                'cart'           => session()->get('kasir_cart') ?? [],
             ]);
         }
 
@@ -62,9 +111,16 @@ class Kasir extends BaseController
         ]);
     }
 
+    // ================================================================
+    // ADD - Tambah ke keranjang (Support JSON & Form-encode)
+    // ================================================================
     public function add()
     {
-        $jenis  = $this->request->getPost('jenis_produk');
+        // 🔥 AMBIL DATA DARI REQUEST (support JSON & Form-encode)
+        $data = $this->getRequestData();
+
+        // 🔥 AMBIL JENIS PRODUK
+        $jenis = $data['jenis_produk'] ?? null;
         $result = [];
 
         if ($jenis === 'fisik') {
@@ -73,22 +129,17 @@ class Kasir extends BaseController
                 'jumlah'    => 'required|numeric|greater_than[0]',
             ];
 
-            if (!$this->validate($validationRules)) {
+            if (!$this->validateData($data, $validationRules)) {
                 if ($this->isApi()) {
-                    return $this->response->setStatusCode(422)->setJSON([
-                        'success' => false,
-                        'message' => 'Validasi gagal',
-                        'code'    => 422,
-                        'errors'  => $this->validator->getErrors(),
-                    ]);
+                    return $this->apiResponse(false, 'Validasi gagal', 422, null, $this->validator->getErrors());
                 }
                 return redirect()->to('/menu/kasir')
                     ->with('validation_errors', $this->validator->getErrors())
                     ->withInput();
             }
 
-            $produkId = $this->request->getPost('produk_id');
-            $jumlah   = (int) $this->request->getPost('jumlah');
+            $produkId = $data['produk_id'];
+            $jumlah   = (int) $data['jumlah'];
             $result   = $this->kasirService->tambahProdukFisikKeKeranjang($produkId, $jumlah);
 
         } elseif ($jenis === 'digital') {
@@ -99,41 +150,34 @@ class Kasir extends BaseController
                 'metode_pembayaran_pulsa' => 'required|in_list[tunai,saldo,transfer,grip]',
             ];
 
-            if (!$this->validate($validationRules)) {
+            if (!$this->validateData($data, $validationRules)) {
                 if ($this->isApi()) {
-                    return $this->response->setStatusCode(422)->setJSON([
-                        'success' => false,
-                        'message' => 'Validasi gagal',
-                        'code'    => 422,
-                        'errors'  => $this->validator->getErrors(),
-                    ]);
+                    return $this->apiResponse(false, 'Validasi gagal', 422, null, $this->validator->getErrors());
                 }
                 return redirect()->to('/menu/kasir')
                     ->with('validation_errors', $this->validator->getErrors())
                     ->withInput();
             }
 
-            $data   = [
-                'no_tujuan_pulsa'         => $this->request->getPost('no_tujuan_pulsa'),
-                'provider_id'             => $this->request->getPost('provider_id'),
-                'nominal_id'              => $this->request->getPost('nominal_id'),
-                'metode_pembayaran_pulsa' => $this->request->getPost('metode_pembayaran_pulsa'),
+            $pulsaData = [
+                'no_tujuan_pulsa'         => $data['no_tujuan_pulsa'],
+                'provider_id'             => $data['provider_id'],
+                'nominal_id'              => $data['nominal_id'],
+                'metode_pembayaran_pulsa' => $data['metode_pembayaran_pulsa'],
             ];
-            $result = $this->kasirService->tambahProdukDigitalKeKeranjang($data);
+            $result = $this->kasirService->tambahProdukDigitalKeKeranjang($pulsaData);
 
         } else {
             $result = ['success' => false, 'message' => 'Jenis produk tidak valid.'];
         }
 
         if ($this->isApi()) {
-            return $this->response
-                ->setStatusCode($result['success'] ? 200 : 400)
-                ->setJSON([
-                    'success' => $result['success'],
-                    'message' => $result['message'],
-                    'code'    => $result['success'] ? 200 : 400,
-                    'cart'    => session()->get('kasir_cart') ?? [],
-                ]);
+            return $this->apiResponse(
+                $result['success'],
+                $result['message'],
+                $result['success'] ? 200 : 400,
+                ['cart' => session()->get('kasir_cart') ?? []]
+            );
         }
 
         if (!$result['success']) {
@@ -142,17 +186,17 @@ class Kasir extends BaseController
         return redirect()->to('/menu/kasir')->with('success', $result['message']);
     }
 
+    // ================================================================
+    // REMOVE - Hapus dari keranjang
+    // ================================================================
     public function remove()
     {
-        $itemId = $this->request->getPost('item_id');
+        $data = $this->getRequestData();
+        $itemId = $data['item_id'] ?? null;
 
         if (!$itemId) {
             if ($this->isApi()) {
-                return $this->response->setStatusCode(400)->setJSON([
-                    'success' => false,
-                    'message' => 'Item tidak ditemukan.',
-                    'code'    => 400,
-                ]);
+                return $this->apiResponse(false, 'Item tidak ditemukan.', 400);
             }
             return redirect()->to('/menu/kasir')->with('error', 'Item tidak ditemukan.');
         }
@@ -160,14 +204,12 @@ class Kasir extends BaseController
         $result = $this->kasirService->hapusDariKeranjang($itemId);
 
         if ($this->isApi()) {
-            return $this->response
-                ->setStatusCode($result['success'] ? 200 : 400)
-                ->setJSON([
-                    'success' => $result['success'],
-                    'message' => $result['message'],
-                    'code'    => $result['success'] ? 200 : 400,
-                    'cart'    => session()->get('kasir_cart') ?? [],
-                ]);
+            return $this->apiResponse(
+                $result['success'],
+                $result['message'],
+                $result['success'] ? 200 : 400,
+                ['cart' => session()->get('kasir_cart') ?? []]
+            );
         }
 
         if (!$result['success']) {
@@ -176,18 +218,18 @@ class Kasir extends BaseController
         return redirect()->to('/menu/kasir')->with('success', $result['message']);
     }
 
+    // ================================================================
+    // CHECKOUT
+    // ================================================================
     public function checkout()
     {
-        $cart   = session()->get('kasir_cart') ?? [];
+        $data = $this->getRequestData();
+        $cart = session()->get('kasir_cart') ?? [];
         $userId = session()->get('user_id');
 
         if (empty($cart)) {
             if ($this->isApi()) {
-                return $this->response->setStatusCode(400)->setJSON([
-                    'success' => false,
-                    'message' => 'Tidak ada item di keranjang.',
-                    'code'    => 400,
-                ]);
+                return $this->apiResponse(false, 'Tidak ada item di keranjang.', 400);
             }
             return redirect()->to('/menu/kasir')->with('error', 'Tidak ada item di keranjang.');
         }
@@ -196,39 +238,32 @@ class Kasir extends BaseController
             'metode_pembayaran' => 'required|in_list[tunai,saldo,transfer,grip]',
         ];
 
-        if (!$this->validate($validationRules)) {
+        if (!$this->validateData($data, $validationRules)) {
             if ($this->isApi()) {
-                return $this->response->setStatusCode(422)->setJSON([
-                    'success' => false,
-                    'message' => 'Validasi gagal',
-                    'code'    => 422,
-                    'errors'  => $this->validator->getErrors(),
-                ]);
+                return $this->apiResponse(false, 'Validasi gagal', 422, null, $this->validator->getErrors());
             }
             return redirect()->to('/menu/kasir')
                 ->with('validation_errors', $this->validator->getErrors());
         }
 
-        $data = [
-            'ppn_percent' => (float) $this->request->getPost('ppn_percent'),
-            'ppn'         => (float) $this->request->getPost('ppn'),
-            'diskon'      => (float) $this->request->getPost('diskon'),
-            'total'       => (float) $this->request->getPost('grand_total'),
-            'metode'      => $this->request->getPost('metode_pembayaran'),
+        $checkoutData = [
+            'ppn_percent' => (float) ($data['ppn_percent'] ?? 0),
+            'ppn'         => (float) ($data['ppn'] ?? 0),
+            'diskon'      => (float) ($data['diskon'] ?? 0),
+            'total'       => (float) ($data['grand_total'] ?? 0),
+            'metode'      => $data['metode_pembayaran'],
             'created_by'  => $userId,
         ];
 
-        $result = $this->kasirService->checkout($data);
+        $result = $this->kasirService->checkout($checkoutData);
 
         if ($this->isApi()) {
-            return $this->response
-                ->setStatusCode($result['success'] ? 200 : 500)
-                ->setJSON([
-                    'success' => $result['success'],
-                    'message' => $result['message'],
-                    'code'    => $result['success'] ? 200 : 500,
-                    'data'    => $result['data'] ?? null,
-                ]);
+            return $this->apiResponse(
+                $result['success'],
+                $result['message'],
+                $result['success'] ? 200 : 500,
+                $result['data'] ?? null
+            );
         }
 
         if (!$result['success']) {

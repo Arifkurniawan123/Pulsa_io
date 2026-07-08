@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'screens/login_screen.dart';
 import 'screens/dashboard_screen.dart';
-import 'screens/kasir_screen.dart';
 import 'screens/pulsa_provider_screen.dart';
 import 'screens/topup_saldo_screen.dart';
 import 'screens/user_screen.dart';
@@ -25,7 +24,7 @@ class MyApp extends StatelessWidget {
         '/dashboard': (context) => const DashboardScreen(),
         '/pulsa-provider': (context) => const PulsaProviderScreen(),
         '/topup-saldo': (context) => const TopupSaldoScreen(),
-        '/scan-pulsa': (context) => const ScanPulsaScreen(),
+        '/laporan-pulsa': (context) => const ScanPulsaScreen(),
         '/user': (context) => const UserScreen(),
         '/history': (context) => const HistoryScreen(),
       },

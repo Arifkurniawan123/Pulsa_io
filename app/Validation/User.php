@@ -10,7 +10,7 @@ class User
             'nama_lengkap' => [
                 'rules' => 'required|min_length[3]',
                 'errors' => [
-                    'required' => 'Field nama wajib diisi',
+                    'required'   => 'Field nama wajib diisi',
                     'min_length' => 'Field nama minimal 3 karakter',
                 ]
             ],
@@ -23,15 +23,15 @@ class User
             'username' => [
                 'rules' => 'required|min_length[6]|is_unique[tbl_user.username]',
                 'errors' => [
-                    'required' => 'Field username wajib diisi',
+                    'required'   => 'Field username wajib diisi',
                     'min_length' => 'Field username minimal 6 karakter',
-                    'is_unique' => 'Username sudah digunakan',
+                    'is_unique'  => 'Username sudah digunakan',
                 ]
             ],
             'password' => [
                 'rules' => 'required|min_length[6]',
                 'errors' => [
-                    'required' => 'Field password wajib diisi',
+                    'required'   => 'Field password wajib diisi',
                     'min_length' => 'Field password minimal 6 karakter',
                 ]
             ],
@@ -39,11 +39,11 @@ class User
                 'rules' => 'permit_empty|valid_email|is_unique[tbl_user.email]',
                 'errors' => [
                     'valid_email' => 'Format email tidak valid',
-                    'is_unique' => 'Email sudah digunakan',
+                    'is_unique'   => 'Email sudah digunakan',
                 ]
             ],
             'no_tlp' => [
-                'rules' => 'permit_empty|regex_match[/^(\\+62|62|08)[0-9]{8,13}$/]',
+                'rules' => 'permit_empty|regex_match[/^(\+62|62|08)[0-9]{8,13}$/]',
                 'errors' => [
                     'regex_match' => 'Format nomor telepon tidak valid',
                 ]
@@ -54,12 +54,13 @@ class User
                     'min_length' => 'Field alamat minimal 10 karakter',
                 ]
             ],
+            // FIX: tambah permit_empty supaya tidak wajib dikirim dari Flutter
             'image' => [
-                'rules' => 'is_image[image]|mime_in[image,image/jpg,image/jpeg,image/png]|max_size[image,1024]',
+                'rules' => 'permit_empty|is_image[image]|mime_in[image,image/jpg,image/jpeg,image/png]|max_size[image,1024]',
                 'errors' => [
-                    'is_image' => 'File yang diunggah bukan gambar',
-                    'mime_in' => 'Format gambar hanya boleh JPG, JPEG, atau PNG',
-                    'max_size' => 'Ukuran gambar maksimal 1 MB'
+                    'is_image'  => 'File yang diunggah bukan gambar',
+                    'mime_in'   => 'Format gambar hanya boleh JPG, JPEG, atau PNG',
+                    'max_size'  => 'Ukuran gambar maksimal 1 MB',
                 ]
             ]
         ];
@@ -71,7 +72,7 @@ class User
             'nama_lengkap' => [
                 'rules' => 'required|min_length[3]',
                 'errors' => [
-                    'required' => 'Field nama wajib diisi',
+                    'required'   => 'Field nama wajib diisi',
                     'min_length' => 'Field nama minimal 3 karakter',
                 ]
             ],
@@ -84,9 +85,9 @@ class User
             'username' => [
                 'rules' => 'required|min_length[6]|is_unique[tbl_user.username,id,' . $id . ']',
                 'errors' => [
-                    'required' => 'Field username wajib diisi',
+                    'required'   => 'Field username wajib diisi',
                     'min_length' => 'Field username minimal 6 karakter',
-                    'is_unique' => 'Username sudah digunakan',
+                    'is_unique'  => 'Username sudah digunakan',
                 ]
             ],
             'password' => [
@@ -99,11 +100,11 @@ class User
                 'rules' => 'permit_empty|valid_email|is_unique[tbl_user.email,id,' . $id . ']',
                 'errors' => [
                     'valid_email' => 'Format email tidak valid',
-                    'is_unique' => 'Email sudah digunakan',
+                    'is_unique'   => 'Email sudah digunakan',
                 ]
             ],
             'no_tlp' => [
-                'rules' => 'permit_empty|regex_match[/^(\\+62|62|08)[0-9]{8,13}$/]',
+                'rules' => 'permit_empty|regex_match[/^(\+62|62|08)[0-9]{8,13}$/]',
                 'errors' => [
                     'regex_match' => 'Format nomor telepon tidak valid',
                 ]
@@ -114,12 +115,13 @@ class User
                     'min_length' => 'Field alamat minimal 10 karakter',
                 ]
             ],
+            // FIX: tambah permit_empty
             'image' => [
-                'rules' => 'is_image[image]|mime_in[image,image/jpg,image/jpeg,image/png]|max_size[image,1024]',
+                'rules' => 'permit_empty|is_image[image]|mime_in[image,image/jpg,image/jpeg,image/png]|max_size[image,1024]',
                 'errors' => [
-                    'is_image' => 'File yang diunggah bukan gambar',
-                    'mime_in' => 'Format gambar hanya boleh JPG, JPEG, atau PNG',
-                    'max_size' => 'Ukuran gambar maksimal 1 MB'
+                    'is_image'  => 'File yang diunggah bukan gambar',
+                    'mime_in'   => 'Format gambar hanya boleh JPG, JPEG, atau PNG',
+                    'max_size'  => 'Ukuran gambar maksimal 1 MB',
                 ]
             ]
         ];

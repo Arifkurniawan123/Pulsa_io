@@ -1,5 +1,10 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:dio/dio.dart';
+import 'package:excel/excel.dart' as excel;
+import 'package:share_plus/share_plus.dart';
+import 'package:path_provider/path_provider.dart';
 import '../services/api_service.dart';
 import '../widgets/custom_sidebar.dart';
 import '../models/topup_saldo_history.dart';
@@ -15,6 +20,7 @@ class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProvider
   final ApiService _api = ApiService();
   late TabController _tabController;
   bool _isLoading = true;
+  bool _isExporting = false;
   String _error = '';
   int _userRole = 0;
 
@@ -78,52 +84,114 @@ class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProvider
     }
   }
 
-  void _onSidebarItemSelected(int index) async {
-    final roleId = await _api.getUserRole();
-    switch (index) {
-      case 0:
-        if (roleId == 2) Navigator.pushReplacementNamed(context, '/dashboard');
-        else Navigator.pushReplacementNamed(context, '/kasir');
-        break;
-      case 1:
-        Navigator.pushReplacementNamed(context, '/pulsa-provider');
-        break;
-      case 2:
-        Navigator.pushReplacementNamed(context, '/topup-saldo');
-        break;
-      case 3:
-        Navigator.pushReplacementNamed(context, '/scan-pulsa');
-        break;
-      case 4:
-        if (roleId == 2) Navigator.pushReplacementNamed(context, '/user');
-        else Navigator.pushReplacementNamed(context, '/history');
-        break;
-      case 5:
-        if (roleId == 2) {
-          // sudah di history (admin)
-        }
-        break;
-      default:
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Fitur belum tersedia')),
-        );
+  // ==================== EXPORT WITH SHARE ====================
+  Future<void> _exportToExcel() async {
+    if (_saldoHistory.isEmpty && _pulsaHistory.isEmpty) {
+      _showSnack('Tidak ada data untuk diekspor');
+      return;
     }
+
+    setState(() => _isExporting = true);
+    try {
+      final workbook = excel.Excel.createExcel();
+      _fillSaldoSheet(workbook['Topup Saldo']);
+      _fillPulsaSheet(workbook['Topup Pulsa']);
+      final bytes = workbook.encode();
+      if (bytes == null) {
+        _showSnack('Gagal membuat file Excel', color: Colors.red);
+        return;
+      }
+
+      final directory = await getTemporaryDirectory();
+      final filename = 'history_transaksi_${DateTime.now().millisecondsSinceEpoch}.xlsx';
+      final file = File('${directory.path}/$filename');
+      await file.writeAsBytes(bytes);
+
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        text: 'Riwayat Transaksi - Pulsa IO',
+        subject: 'Riwayat Transaksi',
+      );
+
+      _showSnack('File siap dibagikan', color: Colors.green);
+    } catch (e) {
+      _showSnack('Gagal export: $e', color: Colors.red);
+    } finally {
+      if (mounted) setState(() => _isExporting = false);
+    }
+  }
+
+  void _fillSaldoSheet(excel.Sheet sheet) {
+    final headers = ['No', 'Tanggal', 'Nominal', 'Metode', 'Referensi ID', 'Status', 'Tipe'];
+    for (int i = 0; i < headers.length; i++) {
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0)).value = headers[i];
+    }
+
+    if (_saldoHistory.isEmpty) {
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 1)).value = 'Tidak ada data';
+      return;
+    }
+
+    for (int i = 0; i < _saldoHistory.length; i++) {
+      final item = _saldoHistory[i];
+      final row = i + 1;
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value = i + 1;
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row)).value = _formatDateTime(item.createdAt);
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: row)).value = item.nominal;
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: row)).value = item.metodePembayaran;
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: row)).value = item.referensiId;
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: row)).value = item.status;
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 6, rowIndex: row)).value = item.tipeTransaksiLabel;
+    }
+  }
+
+  void _fillPulsaSheet(excel.Sheet sheet) {
+    final headers = ['No', 'Tanggal', 'Nominal', 'Metode', 'Referensi ID', 'Status', 'Tipe'];
+    for (int i = 0; i < headers.length; i++) {
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0)).value = headers[i];
+    }
+
+    if (_pulsaHistory.isEmpty) {
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 1)).value = 'Tidak ada data';
+      return;
+    }
+
+    for (int i = 0; i < _pulsaHistory.length; i++) {
+      final item = _pulsaHistory[i];
+      final row = i + 1;
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value = i + 1;
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row)).value = _formatDateTime(item.createdAt);
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: row)).value = item.nominal;
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: row)).value = item.metodePembayaran;
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: row)).value = item.referensiId;
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: row)).value = item.status;
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 6, rowIndex: row)).value = item.tipeTransaksiLabel;
+    }
+  }
+
+  String _formatDateTime(DateTime dt) {
+    return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} '
+        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  }
+
+  void _showSnack(String msg, {Color? color}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: color));
   }
 
   @override
   Widget build(BuildContext context) {
-    final isAdmin = _userRole == 2;
-    final selectedIndex = isAdmin ? 5 : 4; // riwayat di index 5 (admin) atau 4 (kasir)
-
     return Scaffold(
-      drawer: CustomSidebar(selectedIndex: selectedIndex, onItemSelected: _onSidebarItemSelected),
+      drawer: const CustomSidebar(currentRoute: '/history'),
       appBar: AppBar(
         title: const Text('Riwayat Transaksi'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.qr_code_scanner),
-            tooltip: 'Scan Pulsa',
-            onPressed: () => Navigator.pushNamed(context, '/scan-pulsa'),
+            icon: _isExporting
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.share),
+            tooltip: 'Export & Share Excel',
+            onPressed: _isExporting ? null : _exportToExcel,
           ),
         ],
         bottom: TabBar(
@@ -208,7 +276,7 @@ class _HistoryScreenState extends State<HistoryScreen> with SingleTickerProvider
                         ],
                       ),
                       Text(
-                        item.createdAt.toString().split('.')[0],
+                        _formatDateTime(item.createdAt),
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey),
                       ),
                     ],

@@ -3,21 +3,15 @@
 namespace App\Controllers;
 
 use App\Controllers\BaseController;
-use App\Services\LaporanPulsa as ServicesLaporanPulsa;
-use App\Services\ExcelExportService;
-use App\Services\PDFExportService;
+use App\Services\LaporanPulsa as LaporanPulsaService;
 
 class LaporanPulsa extends BaseController
 {
     protected $laporanPulsaService;
-    protected $excelExportService;
-    protected $pdfExportService;
 
     public function __construct()
     {
-        $this->laporanPulsaService = new ServicesLaporanPulsa();
-        $this->excelExportService  = new ExcelExportService();
-        $this->pdfExportService    = new PDFExportService();
+        $this->laporanPulsaService = new LaporanPulsaService();
         helper(['form', 'url']);
     }
 
@@ -26,214 +20,407 @@ class LaporanPulsa extends BaseController
         return str_contains($this->request->getUri()->getPath(), 'api/');
     }
 
+    /**
+     * Ambil data dari request (support JSON, POST, Form-encode)
+     */
+    private function getRequestData(): array
+    {
+        $contentType = $this->request->getHeaderLine('Content-Type');
+        
+        if (strpos($contentType, 'application/json') !== false) {
+            $jsonData = $this->request->getJSON(true);
+            if (is_array($jsonData) && !empty($jsonData)) {
+                return $jsonData;
+            }
+        }
+
+        if (strpos($contentType, 'application/x-www-form-urlencoded') !== false || 
+            strpos($contentType, 'multipart/form-data') !== false) {
+            $postData = $this->request->getPost();
+            if (is_array($postData) && !empty($postData)) {
+                return $postData;
+            }
+        }
+
+        $postData = $this->request->getPost();
+        if (is_array($postData) && !empty($postData)) {
+            return $postData;
+        }
+
+        $rawBody = $this->request->getBody();
+        if (!empty($rawBody)) {
+            $decoded = json_decode($rawBody, true);
+            if (is_array($decoded) && !empty($decoded)) {
+                return $decoded;
+            }
+            parse_str($rawBody, $parsed);
+            if (is_array($parsed) && !empty($parsed)) {
+                return $parsed;
+            }
+        }
+
+        return [];
+    }
+
+    private function apiResponse($success, $message, $code, $data = null, $errors = null)
+    {
+        $response = ['success' => $success, 'message' => $message, 'code' => $code];
+        if ($data !== null) $response['data'] = $data;
+        if ($errors !== null) $response['errors'] = $errors;
+        return $this->response->setStatusCode($code)->setJSON($response);
+    }
+
+    /**
+     * Validasi nomor HP (08, 62, +62)
+     */
+    private function validatePhoneNumber($noTujuan): bool
+    {
+        return preg_match('/^(08|62|\+62)[0-9]{8,13}$/', $noTujuan) === 1;
+    }
+
+    // ================================================================
+    // GET ALL + FILTER
+    // ================================================================
     public function index()
     {
-        $startDate    = $this->request->getGet('start_date');
-        $endDate      = $this->request->getGet('end_date');
-        $transactions = $this->laporanPulsaService->getData($startDate, $endDate);
+        $startDate = $this->request->getGet('start_date');
+        $endDate   = $this->request->getGet('end_date');
+        $status    = $this->request->getGet('status');
+
+        $transactions = $this->laporanPulsaService->getData($startDate, $endDate, $status);
         $summary      = $this->laporanPulsaService->getSummaryReport($startDate, $endDate);
 
         if ($this->isApi()) {
-            return $this->response->setStatusCode(200)->setJSON([
-                'success'      => true,
-                'message'      => 'Data laporan pulsa berhasil diambil',
-                'code'         => 200,
-                'data'         => $transactions['success'] ? $transactions['data'] : [],
+            return $this->apiResponse(true, 'Data laporan pulsa berhasil diambil', 200, [
+                'transactions' => $transactions['success'] ? $transactions['data'] : [],
                 'summary'      => $summary['success'] ? $summary['data'] : [],
-                'start_date'   => $startDate,
-                'end_date'     => $endDate,
+                'filters'      => [
+                    'start_date' => $startDate,
+                    'end_date'   => $endDate,
+                    'status'     => $status,
+                ]
             ]);
         }
 
         return view('laporan_pulsa/index', [
-            'title'        => 'Laporan Penjualan Pulsa',
+            'title'        => 'Laporan Pulsa',
+            'page'         => 'laporan-pulsa',
             'transactions' => $transactions['success'] ? $transactions['data'] : [],
             'summary'      => $summary['success'] ? $summary['data'] : [],
             'startDate'    => $startDate,
             'endDate'      => $endDate,
-            'page'         => 'laporan_pulsa',
+            'status'       => $status,
         ]);
     }
 
-    public function create()
-    {
-        $dataProvider = $this->laporanPulsaService->getProviders();
-        $dataNominal  = $this->laporanPulsaService->getNominals();
-
-        return view('laporan_pulsa/create', [
-            'title'      => 'Tambah Transaksi Pulsa',
-            'providers'  => $dataProvider['success'] ? $dataProvider['data'] : [],
-            'nominals'   => $dataNominal['success'] ? $dataNominal['data'] : [],
-            'page'       => 'laporan_pulsa',
-            'validation' => \Config\Services::validation(),
-        ]);
-    }
-
-    public function store()
-    {
-        $validationRules = [
-            'no_tujuan'         => 'required|numeric',
-            'provider_id'       => 'required|integer',
-            'nominal_id'        => 'required|integer',
-            'metode_pembayaran' => 'required|in_list[tunai,saldo,transfer,grip]',
-        ];
-
-        if (!$this->validate($validationRules)) {
-            if ($this->isApi()) {
-                return $this->response->setStatusCode(422)->setJSON([
-                    'success' => false,
-                    'message' => 'Validasi gagal',
-                    'code'    => 422,
-                    'errors'  => $this->validator->getErrors(),
-                ]);
-            }
-            return redirect()->back()->withInput()->with('validation', $this->validator->getErrors());
-        }
-
-        $data = [
-            'no_tujuan'         => $this->request->getPost('no_tujuan'),
-            'provider_id'       => $this->request->getPost('provider_id'),
-            'nominal_id'        => $this->request->getPost('nominal_id'),
-            'metode_pembayaran' => $this->request->getPost('metode_pembayaran'),
-            'created_by'        => session()->get('user_id'),
-        ];
-
-        $result = $this->laporanPulsaService->createData($data);
-
-        if ($this->isApi()) {
-            return $this->response
-                ->setStatusCode($result['success'] ? 201 : 500)
-                ->setJSON([
-                    'success' => $result['success'],
-                    'message' => $result['message'],
-                    'code'    => $result['success'] ? 201 : 500,
-                ]);
-        }
-
-        if (!$result['success']) {
-            return redirect()->back()->withInput()->with('error', $result['message']);
-        }
-        return redirect()->to('/laporan-pulsa')->with('success', $result['message']);
-    }
-
-    public function edit($id)
+    // ================================================================
+    // GET BY ID
+    // ================================================================
+    public function show($id)
     {
         $result = $this->laporanPulsaService->getById($id);
 
         if ($this->isApi()) {
-            return $this->response
-                ->setStatusCode($result['success'] ? 200 : 404)
-                ->setJSON([
-                    'success' => $result['success'],
-                    'message' => $result['message'],
-                    'code'    => $result['success'] ? 200 : 404,
-                    'data'    => $result['data'] ?? null,
-                ]);
+            if (!$result['success']) {
+                return $this->apiResponse(false, $result['message'], 404);
+            }
+            return $this->apiResponse(true, 'Data ditemukan', 200, $result['data']);
         }
 
         if (!$result['success']) {
             return redirect()->to('/laporan-pulsa')->with('error', $result['message']);
         }
 
-        $dataProvider = $this->laporanPulsaService->getProviders();
-        $dataNominal  = $this->laporanPulsaService->getNominals();
-
-        return view('laporan_pulsa/edit', [
-            'title'      => 'Edit Transaksi Pulsa',
-            'transaksi'  => $result['data'],
-            'providers'  => $dataProvider['success'] ? $dataProvider['data'] : [],
-            'nominals'   => $dataNominal['success'] ? $dataNominal['data'] : [],
-            'page'       => 'laporan_pulsa',
-            'validation' => \Config\Services::validation(),
+        return view('laporan_pulsa/show', [
+            'title'       => 'Detail Transaksi Pulsa',
+            'page'        => 'laporan-pulsa',
+            'transaction' => $result['data'],
         ]);
     }
 
-    public function update($id)
+    // ================================================================
+    // CREATE (GET Form)
+    // ================================================================
+    public function create()
     {
-        $validationRules = [
-            'no_tujuan'         => 'required|numeric',
-            'provider_id'       => 'required|integer',
-            'nominal_id'        => 'required|integer',
-            'metode_pembayaran' => 'required|in_list[tunai,saldo,transfer,grip]',
-            'status'            => 'required|in_list[proses,sukses,gagal]',
-        ];
+        $providers = $this->laporanPulsaService->getProviders();
+        $nominals  = $this->laporanPulsaService->getNominals();
 
-        if (!$this->validate($validationRules)) {
-            if ($this->isApi()) {
-                return $this->response->setStatusCode(422)->setJSON([
-                    'success' => false,
-                    'message' => 'Validasi gagal',
-                    'code'    => 422,
-                    'errors'  => $this->validator->getErrors(),
-                ]);
-            }
-            return redirect()->back()->withInput()->with('validation', $this->validator->getErrors());
+        return view('laporan_pulsa/create', [
+            'title'     => 'Tambah Transaksi Pulsa',
+            'page'      => 'laporan-pulsa',
+            'providers' => $providers['success'] ? $providers['data'] : [],
+            'nominals'  => $nominals['success'] ? $nominals['data'] : [],
+        ]);
+    }
+
+    // ================================================================
+    // STORE (POST)
+    // ================================================================
+    public function store()
+    {
+        $data = $this->getRequestData();
+        
+        if (isset($data['_method'])) {
+            unset($data['_method']);
         }
 
-        $data = [
-            'no_tujuan'         => $this->request->getPost('no_tujuan'),
-            'provider_id'       => $this->request->getPost('provider_id'),
-            'nominal_id'        => $this->request->getPost('nominal_id'),
-            'metode_pembayaran' => $this->request->getPost('metode_pembayaran'),
-            'status'            => $this->request->getPost('status'),
+        // 🔥 VALIDASI
+        $rules = [
+            'no_tujuan' => [
+                'rules' => 'required|numeric|min_length[10]|max_length[15]',
+                'errors' => [
+                    'required' => 'Nomor tujuan harus diisi',
+                    'numeric' => 'Nomor tujuan harus berupa angka',
+                    'min_length' => 'Nomor tujuan minimal 10 digit',
+                    'max_length' => 'Nomor tujuan maksimal 15 digit',
+                ]
+            ],
+            'provider_id' => [
+                'rules' => 'required|integer|is_not_unique[tbl_provider_pulsa.id]',
+                'errors' => [
+                    'required' => 'Provider harus dipilih',
+                    'integer' => 'Provider tidak valid',
+                    'is_not_unique' => 'Provider tidak ditemukan',
+                ]
+            ],
+            'nominal_id' => [
+                'rules' => 'required|integer|is_not_unique[tbl_nominal_pulsa.id]',
+                'errors' => [
+                    'required' => 'Nominal harus dipilih',
+                    'integer' => 'Nominal tidak valid',
+                    'is_not_unique' => 'Nominal tidak ditemukan',
+                ]
+            ],
+            'metode_pembayaran' => [
+                'rules' => 'required|in_list[tunai,saldo,transfer,grip]',
+                'errors' => [
+                    'required' => 'Metode pembayaran harus diisi',
+                    'in_list' => 'Metode pembayaran harus tunai, saldo, transfer, atau grip',
+                ]
+            ]
         ];
 
-        $result = $this->laporanPulsaService->updateData($id, $data);
+        if (!$this->validateData($data, $rules)) {
+            if ($this->isApi()) {
+                return $this->apiResponse(false, 'Validasi gagal', 422, null, $this->validator->getErrors());
+            }
+            return redirect()->back()->withInput()->with('errors', $this->validator->getErrors());
+        }
+
+        // 🔥 VALIDASI NO HP (AWALAN 08, 62, +62)
+        if (!$this->validatePhoneNumber($data['no_tujuan'])) {
+            $errors = ['no_tujuan' => 'Nomor HP harus diawali 08, 62, atau +62 (8-13 digit)'];
+            if ($this->isApi()) {
+                return $this->apiResponse(false, 'Validasi gagal', 422, null, $errors);
+            }
+            return redirect()->back()->withInput()->with('errors', $errors);
+        }
+
+        // 🔥 Ambil user_id
+        $userId = $this->isApi() 
+            ? ($this->request->user->user_id ?? null) 
+            : session()->get('user_id');
+
+        if (!$userId && $this->isApi()) {
+            return $this->apiResponse(false, 'Unauthorized - User tidak ditemukan', 401);
+        }
+
+        $data['created_by'] = $userId;
+
+        // 🔥 Proses simpan
+        $result = $this->laporanPulsaService->createData($data);
 
         if ($this->isApi()) {
-            return $this->response
-                ->setStatusCode($result['success'] ? 200 : 500)
-                ->setJSON([
-                    'success' => $result['success'],
-                    'message' => $result['message'],
-                    'code'    => $result['success'] ? 200 : 500,
-                ]);
+            return $this->apiResponse($result['success'], $result['message'], $result['success'] ? 201 : 500);
         }
 
         if (!$result['success']) {
             return redirect()->back()->withInput()->with('error', $result['message']);
         }
+
         return redirect()->to('/laporan-pulsa')->with('success', $result['message']);
     }
 
+    // ================================================================
+    // EDIT (GET Form)
+    // ================================================================
+    public function edit($id)
+    {
+        $result = $this->laporanPulsaService->getById($id);
+
+        if (!$result['success']) {
+            return redirect()->to('/laporan-pulsa')->with('error', $result['message']);
+        }
+
+        $providers = $this->laporanPulsaService->getProviders();
+        $nominals  = $this->laporanPulsaService->getNominals();
+
+        return view('laporan_pulsa/edit', [
+            'title'       => 'Edit Transaksi Pulsa',
+            'page'        => 'laporan-pulsa',
+            'transaction' => $result['data'],
+            'providers'   => $providers['success'] ? $providers['data'] : [],
+            'nominals'    => $nominals['success'] ? $nominals['data'] : [],
+        ]);
+    }
+
+    // ================================================================
+    // UPDATE (PUT)
+    // ================================================================
+    public function update($id)
+    {
+        $data = $this->getRequestData();
+        
+        if (isset($data['_method'])) {
+            unset($data['_method']);
+        }
+
+        // 🔥 VALIDASI
+        $rules = [
+            'no_tujuan' => [
+                'rules' => 'required|numeric|min_length[10]|max_length[15]',
+                'errors' => [
+                    'required' => 'Nomor tujuan harus diisi',
+                    'numeric' => 'Nomor tujuan harus berupa angka',
+                    'min_length' => 'Nomor tujuan minimal 10 digit',
+                    'max_length' => 'Nomor tujuan maksimal 15 digit',
+                ]
+            ],
+            'provider_id' => [
+                'rules' => 'required|integer|is_not_unique[tbl_provider_pulsa.id]',
+                'errors' => [
+                    'required' => 'Provider harus dipilih',
+                    'integer' => 'Provider tidak valid',
+                    'is_not_unique' => 'Provider tidak ditemukan',
+                ]
+            ],
+            'nominal_id' => [
+                'rules' => 'required|integer|is_not_unique[tbl_nominal_pulsa.id]',
+                'errors' => [
+                    'required' => 'Nominal harus dipilih',
+                    'integer' => 'Nominal tidak valid',
+                    'is_not_unique' => 'Nominal tidak ditemukan',
+                ]
+            ],
+            'metode_pembayaran' => [
+                'rules' => 'required|in_list[tunai,saldo,transfer,grip]',
+                'errors' => [
+                    'required' => 'Metode pembayaran harus diisi',
+                    'in_list' => 'Metode pembayaran harus tunai, saldo, transfer, atau grip',
+                ]
+            ],
+            'status' => [
+                'rules' => 'required|in_list[proses,sukses,gagal]',
+                'errors' => [
+                    'required' => 'Status harus diisi',
+                    'in_list' => 'Status harus proses, sukses, atau gagal',
+                ]
+            ]
+        ];
+
+        if (!$this->validateData($data, $rules)) {
+            if ($this->isApi()) {
+                return $this->apiResponse(false, 'Validasi gagal', 422, null, $this->validator->getErrors());
+            }
+            return redirect()->back()->withInput()->with('errors', $this->validator->getErrors());
+        }
+
+        // 🔥 VALIDASI NO HP (AWALAN 08, 62, +62)
+        if (!$this->validatePhoneNumber($data['no_tujuan'])) {
+            $errors = ['no_tujuan' => 'Nomor HP harus diawali 08, 62, atau +62 (8-13 digit)'];
+            if ($this->isApi()) {
+                return $this->apiResponse(false, 'Validasi gagal', 422, null, $errors);
+            }
+            return redirect()->back()->withInput()->with('errors', $errors);
+        }
+
+        // 🔥 Proses update
+        $result = $this->laporanPulsaService->updateData($id, $data);
+
+        if ($this->isApi()) {
+            return $this->apiResponse($result['success'], $result['message'], $result['success'] ? 200 : 500);
+        }
+
+        if (!$result['success']) {
+            return redirect()->back()->withInput()->with('error', $result['message']);
+        }
+
+        return redirect()->to('/laporan-pulsa')->with('success', $result['message']);
+    }
+
+    // ================================================================
+    // DELETE
+    // ================================================================
     public function delete($id)
     {
         $result = $this->laporanPulsaService->deleteData($id);
 
-        return $this->response
-            ->setStatusCode($result['code'])
-            ->setJSON([
-                'success' => $result['success'],
-                'message' => $result['message'],
-                'code'    => $result['code'],
-            ]);
+        if ($this->isApi() || $this->request->isAJAX()) {
+            return $this->response
+                ->setStatusCode($result['code'] ?? 500)
+                ->setJSON($result);
+        }
+
+        return redirect()
+            ->to('/laporan-pulsa')
+            ->with($result['success'] ? 'success' : 'error', $result['message']);
     }
 
+    // ================================================================
+    // DESTROY (alias delete)
+    // ================================================================
+    public function destroy($id)
+    {
+        return $this->delete($id);
+    }
+
+    // ================================================================
+    // GET PROVIDERS
+    // ================================================================
+    public function getProviders()
+    {
+        $result = $this->laporanPulsaService->getProviders();
+
+        if ($this->isApi()) {
+            return $this->apiResponse(
+                $result['success'], 
+                $result['success'] ? 'Data provider berhasil diambil' : 'Gagal mengambil data provider', 
+                $result['success'] ? 200 : 500, 
+                $result['success'] ? $result['data'] : null
+            );
+        }
+
+        return $this->response->setJSON($result);
+    }
+
+    // ================================================================
+    // GET NOMINALS BY PROVIDER
+    // ================================================================
     public function getNominals($providerId)
     {
         $nominalModel = new \App\Models\NominalModel();
-        try {
-            $nominals = $nominalModel->where('provider_id', $providerId)
-                ->where('status', 'active')
-                ->findAll();
+        $data = $nominalModel
+            ->where('provider_id', $providerId)
+            ->where('status', 'active')
+            ->orderBy('nominal', 'ASC')
+            ->findAll();
 
-            return $this->response->setJSON([
-                'success'  => true,
-                'nominals' => $nominals,
-            ]);
-        } catch (\Exception $e) {
-            return $this->response->setJSON([
-                'success'  => false,
-                'message'  => $e->getMessage(),
-                'nominals' => [],
-            ]);
+        if ($this->isApi()) {
+            return $this->apiResponse(true, 'Data nominal berhasil diambil', 200, $data);
         }
+
+        return $this->response->setJSON(['success' => true, 'data' => $data]);
     }
 
+    // ================================================================
+    // EXPORT EXCEL
+    // ================================================================
     public function exportExcel()
     {
-        $startDate    = $this->request->getGet('start_date');
-        $endDate      = $this->request->getGet('end_date');
+        $startDate = $this->request->getGet('start_date');
+        $endDate   = $this->request->getGet('end_date');
+
         $dataResult   = $this->laporanPulsaService->getData($startDate, $endDate);
         $summaryResult = $this->laporanPulsaService->getSummaryReport($startDate, $endDate);
 
@@ -241,15 +428,23 @@ class LaporanPulsa extends BaseController
             return redirect()->back()->with('error', 'Gagal mengambil data untuk export');
         }
 
-        return $this->excelExportService->exportLaporanPulsa(
-            $dataResult['data'], $summaryResult['data'], $startDate, $endDate
+        $excelService = new \App\Services\ExcelExportService();
+        return $excelService->exportLaporanPulsa(
+            $dataResult['data'], 
+            $summaryResult['data'], 
+            $startDate, 
+            $endDate
         );
     }
 
+    // ================================================================
+    // EXPORT PDF
+    // ================================================================
     public function exportPDF()
     {
-        $startDate    = $this->request->getGet('start_date');
-        $endDate      = $this->request->getGet('end_date');
+        $startDate = $this->request->getGet('start_date');
+        $endDate   = $this->request->getGet('end_date');
+
         $dataResult   = $this->laporanPulsaService->getData($startDate, $endDate);
         $summaryResult = $this->laporanPulsaService->getSummaryReport($startDate, $endDate);
 
@@ -257,8 +452,12 @@ class LaporanPulsa extends BaseController
             return redirect()->back()->with('error', 'Gagal mengambil data untuk export');
         }
 
-        return $this->pdfExportService->exportLaporanPulsa(
-            $dataResult['data'], $summaryResult['data'], $startDate, $endDate
+        $pdfService = new \App\Services\PDFExportService();
+        return $pdfService->exportLaporanPulsa(
+            $dataResult['data'], 
+            $summaryResult['data'], 
+            $startDate, 
+            $endDate
         );
     }
 }

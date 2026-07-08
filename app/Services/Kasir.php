@@ -10,9 +10,12 @@ use App\Models\NominalModel;
 use App\Models\ProviderModel;
 use Config\Database;
 use Ramsey\Uuid\Uuid;
+use App\Traits\WebSocketTrait;
 
 class Kasir
 {
+    use WebSocketTrait;
+
     protected $produkModel;
     protected $penjualanModel;
     protected $penjualanDetailModel;
@@ -37,16 +40,9 @@ class Kasir
     {
         try {
             $data = $this->produkModel->findAllDataWithStokReady();
-            if (empty($data)) {
-                return [
-                    'success' => true,
-                    'data'    => [],
-                ];
-            }
-
             return [
                 'success' => true,
-                'data'    => $data, 
+                'data'    => $data,
             ];
         } catch (\Throwable $th) {
             log_message('error', $th->getMessage());
@@ -63,22 +59,15 @@ class Kasir
     public function getDataProdukDigital()
     {
         try {
-            // Ambil providers yang aktif
             $providers = $this->providerModel->where('status', 'active')->findAll();
-            
-            // Ambil nominals yang aktif
-            $nominals = $this->nominalModel
-                ->where('status', 'active')
-                ->findAll();
-
-            $data = [
-                'providers' => $providers,
-                'nominals' => $nominals
-            ];
+            $nominals = $this->nominalModel->where('status', 'active')->findAll();
 
             return [
                 'success' => true,
-                'data'    => $data,
+                'data'    => [
+                    'providers' => $providers,
+                    'nominals'  => $nominals
+                ],
             ];
         } catch (\Throwable $th) {
             log_message('error', $th->getMessage());
@@ -104,7 +93,6 @@ class Kasir
                 ];
             }
 
-            // Cek stok
             if ($produk->stok < $jumlah) {
                 return [
                     'success' => false,
@@ -119,18 +107,17 @@ class Kasir
                 $cart[$produkId]['subtotal'] = $cart[$produkId]['jumlah'] * $produk->harga;
             } else {
                 $cart[$produkId] = [
-                    'id' => $produk->id,
-                    'nama' => $produk->nama_produk,
-                    'harga' => $produk->harga,
-                    'jumlah' => $jumlah,
+                    'id'       => $produk->id,
+                    'nama'     => $produk->nama_produk,
+                    'harga'    => $produk->harga,
+                    'jumlah'   => $jumlah,
                     'subtotal' => $jumlah * $produk->harga,
-                    'jenis' => 'fisik'
+                    'jenis'    => 'fisik'
                 ];
             }
 
             session()->set('kasir_cart', $cart);
 
-            // Update stok
             $this->produkModel
                 ->where('id', $produkId)
                 ->set('stok', 'stok - ' . $jumlah, false)
@@ -169,20 +156,19 @@ class Kasir
             $cartId = 'digital_' . uniqid();
 
             $cart[$cartId] = [
-                'id' => $cartId,
-                'nama' => 'Pulsa ' . number_format($nominal['nominal'], 0, ',', '.') . 
-                         ' - ' . ($provider['nama_provider'] ?? '') . 
-                         ' (' . $data['no_tujuan_pulsa'] . ')',
-                'harga' => $nominal['harga_jual'],
-                'jumlah' => 1,
-                'subtotal' => $nominal['harga_jual'],
-                'jenis' => 'digital',
-                // Data khusus pulsa
-                'no_tujuan_pulsa' => $data['no_tujuan_pulsa'],
-                'provider_id' => $data['provider_id'],
-                'nominal_id' => $data['nominal_id'],
-                'nominal_value' => $nominal['nominal'],
-                'harga_modal' => $nominal['harga_modal'],
+                'id'          => $cartId,
+                'nama'        => 'Pulsa ' . number_format($nominal['nominal'], 0, ',', '.') . 
+                                ' - ' . ($provider['nama_provider'] ?? '') . 
+                                ' (' . $data['no_tujuan_pulsa'] . ')',
+                'harga'       => $nominal['harga_jual'],
+                'jumlah'      => 1,
+                'subtotal'    => $nominal['harga_jual'],
+                'jenis'       => 'digital',
+                'no_tujuan_pulsa'         => $data['no_tujuan_pulsa'],
+                'provider_id'             => $data['provider_id'],
+                'nominal_id'              => $data['nominal_id'],
+                'nominal_value'           => $nominal['nominal'],
+                'harga_modal'             => $nominal['harga_modal'],
                 'metode_pembayaran_pulsa' => $data['metode_pembayaran_pulsa']
             ];
 
@@ -202,7 +188,7 @@ class Kasir
     }
 
     /**
-     * Hapus item dari keranjang (fisik dan digital)
+     * Hapus item dari keranjang
      */
     public function hapusDariKeranjang(string $itemId): array
     {
@@ -218,7 +204,6 @@ class Kasir
 
             $item = $cart[$itemId];
 
-            // Jika produk fisik, kembalikan stok
             if ($item['jenis'] === 'fisik') {
                 $this->produkModel
                     ->where('id', $item['id'])
@@ -226,7 +211,6 @@ class Kasir
                     ->update();
             }
 
-            // Hapus dari keranjang
             unset($cart[$itemId]);
             session()->set('kasir_cart', $cart);
 
@@ -262,7 +246,6 @@ class Kasir
             $penjualanId = Uuid::uuid4()->toString();
             $noInvoice = 'INV-' . strtoupper(substr(uniqid(), -6));
 
-            // Hitung total dari semua item di keranjang
             $total = 0;
             foreach ($cart as $item) {
                 $total += $item['subtotal'];
@@ -270,51 +253,48 @@ class Kasir
 
             // Simpan transaksi penjualan
             $this->penjualanModel->insert([
-                'id' => $penjualanId,
-                'no_invoice' => $noInvoice,
-                'created_by' => $userId,
-                'total' => $total,
-                'ppn' => $data['ppn'] ?? 0,
-                'diskon' => $data['diskon'] ?? 0,
+                'id'          => $penjualanId,
+                'no_invoice'  => $noInvoice,
+                'created_by'  => $userId,
+                'total'       => $total,
+                'ppn'         => $data['ppn'] ?? 0,
+                'diskon'      => $data['diskon'] ?? 0,
                 'metode_pembayaran' => $data['metode'],
-                'status' => 'berhasil',
-                'created_at' => date('Y-m-d H:i:s'),
-                'updated_at' => date('Y-m-d H:i:s'),
+                'status'      => 'berhasil',
+                'created_at'  => date('Y-m-d H:i:s'),
+                'updated_at'  => date('Y-m-d H:i:s'),
             ]);
 
             // Proses setiap item di keranjang
             foreach ($cart as $item) {
                 if ($item['jenis'] === 'fisik') {
-                    // Simpan detail penjualan untuk produk fisik
                     $this->penjualanDetailModel->insert([
-                        'id' => Uuid::uuid4()->toString(),
+                        'id'           => Uuid::uuid4()->toString(),
                         'penjualan_id' => $penjualanId,
-                        'produk_id' => $item['id'],
-                        'jumlah' => $item['jumlah'],
-                        'harga' => $item['harga'],
-                        'sub_total' => $item['subtotal'],
-                        'created_at' => date('Y-m-d H:i:s'),
-                        'updated_at' => date('Y-m-d H:i:s'),
+                        'produk_id'    => $item['id'],
+                        'jumlah'       => $item['jumlah'],
+                        'harga'        => $item['harga'],
+                        'sub_total'    => $item['subtotal'],
+                        'created_at'   => date('Y-m-d H:i:s'),
+                        'updated_at'   => date('Y-m-d H:i:s'),
                     ]);
                 } elseif ($item['jenis'] === 'digital') {
-                    // Simpan transaksi pulsa untuk produk digital
                     $noTransaksiPulsa = $this->penjualanPulsaModel->generateNoTransaksi();
                     
-                    // ✅ PERBAIKAN: Tambahkan created_by ke insert data pulsa
                     $this->penjualanPulsaModel->insert([
-                        'no_transaksi' => $noTransaksiPulsa,
-                        'no_tujuan' => $item['no_tujuan_pulsa'],
-                        'provider_id' => $item['provider_id'],
-                        'nominal_id' => $item['nominal_id'],
-                        'nominal' => $item['nominal_value'],
-                        'harga_modal' => $item['harga_modal'],
-                        'harga_jual' => $item['harga'],
-                        'keuntungan' => $item['harga'] - $item['harga_modal'],
+                        'no_transaksi'  => $noTransaksiPulsa,
+                        'no_tujuan'     => $item['no_tujuan_pulsa'],
+                        'provider_id'   => $item['provider_id'],
+                        'nominal_id'    => $item['nominal_id'],
+                        'nominal'       => $item['nominal_value'],
+                        'harga_modal'   => $item['harga_modal'],
+                        'harga_jual'    => $item['harga'],
+                        'keuntungan'    => $item['harga'] - $item['harga_modal'],
                         'metode_pembayaran' => $item['metode_pembayaran_pulsa'],
-                        'status' => 'sukses',
-                        'created_by' => $userId,  // ✅ TAMBAHKAN INI
-                        'created_at' => date('Y-m-d H:i:s'),
-                        'updated_at' => date('Y-m-d H:i:s'),
+                        'status'        => 'sukses',
+                        'created_by'    => $userId,
+                        'created_at'    => date('Y-m-d H:i:s'),
+                        'updated_at'    => date('Y-m-d H:i:s'),
                     ]);
                 }
             }
@@ -328,7 +308,19 @@ class Kasir
                 ];
             }
 
-            // Kosongkan keranjang setelah checkout berhasil
+            // 🔥 KIRIM NOTIFIKASI KE WEBSOCKET
+            $this->sendWebSocketNotification([
+                'type'        => 'produk',
+                'no_invoice'  => $noInvoice,
+                'total'       => (int) $total,
+                'kasir'       => session()->get('name') ?? 'Kasir',
+                'items'       => array_values(array_map(function($item) {
+                    return $item['nama'] . ' x' . $item['jumlah'];
+                }, $cart)),
+                'created_at'  => date('H:i:s')
+            ]);
+
+            // Kosongkan keranjang
             session()->remove('kasir_cart');
 
             return [
@@ -339,6 +331,7 @@ class Kasir
                     'penjualan_id' => $penjualanId
                 ]
             ];
+
         } catch (\Throwable $e) {
             $db->transRollback();
             log_message('error', $e->getMessage());
@@ -351,24 +344,21 @@ class Kasir
     }
 
     /**
-     * Get statistik untuk dashboard kasir
+     * Get statistik harian
      */
     public function getStatistikHarian()
     {
         try {
             $today = date('Y-m-d');
             
-            // Hitung transaksi fisik hari ini
             $transaksiFisik = $this->penjualanModel
                 ->where('DATE(created_at)', $today)
                 ->countAllResults();
 
-            // Hitung transaksi pulsa hari ini
             $transaksiPulsa = $this->penjualanPulsaModel
                 ->where('DATE(created_at)', $today)
                 ->countAllResults();
 
-            // Hitung total pendapatan
             $pendapatanFisik = $this->penjualanModel
                 ->selectSum('total')
                 ->where('DATE(created_at)', $today)
@@ -385,9 +375,9 @@ class Kasir
             return [
                 'success' => true,
                 'data' => [
-                    'transaksi_fisik' => $transaksiFisik,
-                    'transaksi_pulsa' => $transaksiPulsa,
-                    'total_transaksi' => $transaksiFisik + $transaksiPulsa,
+                    'transaksi_fisik'  => $transaksiFisik,
+                    'transaksi_pulsa'  => $transaksiPulsa,
+                    'total_transaksi'  => $transaksiFisik + $transaksiPulsa,
                     'total_pendapatan' => $totalPendapatan
                 ]
             ];

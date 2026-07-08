@@ -177,7 +177,7 @@ class _UserScreenState extends State<UserScreen> {
         Navigator.pushReplacementNamed(context, '/topup-saldo');
         break;
       case 3:
-        Navigator.pushReplacementNamed(context, '/scan-pulsa');
+        Navigator.pushReplacementNamed(context, '/laporan-pulsa');
         break;
       case 4:
         // sudah di user screen
@@ -206,11 +206,9 @@ class _UserScreenState extends State<UserScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isAdmin = _userRole == 2;
-    final selectedIndex = isAdmin ? 3 : 0; // user menu di admin index 3
 
     return Scaffold(
-      drawer: CustomSidebar(selectedIndex: selectedIndex, onItemSelected: _onSidebarItemSelected),
+      drawer: const CustomSidebar(currentRoute: '/user'),
       appBar: AppBar(
         title: const Text('Kelola Pengguna'),
         actions: [

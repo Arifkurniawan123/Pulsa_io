@@ -3,19 +3,15 @@
 namespace App\Controllers;
 
 use App\Controllers\BaseController;
-use App\Services\Produk as ServicesProduk;
-use App\Validation\Produk as ValidationProduk;
-use Config\Services;
+use App\Services\Produk as ProdukService;
 
 class Produk extends BaseController
 {
     protected $produkService;
-    protected $ruleValidation;
 
     public function __construct()
     {
-        $this->produkService   = new ServicesProduk();
-        $this->ruleValidation  = new ValidationProduk();
+        $this->produkService = new ProdukService();
     }
 
     private function isApi(): bool
@@ -23,17 +19,51 @@ class Produk extends BaseController
         return str_contains($this->request->getUri()->getPath(), 'api/');
     }
 
+    private function getRequestData(): array
+    {
+        $contentType = $this->request->getHeaderLine('Content-Type');
+
+        if (str_contains($contentType, 'application/json')) {
+            $json = $this->request->getJSON(true);
+            if (is_array($json) && !empty($json)) {
+                return $json;
+            }
+        }
+
+        $post = $this->request->getPost();
+        if (is_array($post) && !empty($post)) {
+            return $post;
+        }
+
+        return [];
+    }
+
+    private function apiResponse($success, $message, $code, $data = null, $errors = null)
+    {
+        $response = ['success' => $success, 'message' => $message, 'code' => $code];
+        if ($data !== null) $response['data'] = $data;
+        if ($errors !== null) $response['errors'] = $errors;
+        return $this->response->setStatusCode($code)->setJSON($response);
+    }
+
+    // ================================================================
+    // INDEX - SUPPORT SEARCH
+    // ================================================================
     public function index()
     {
-        $dataProduk = $this->produkService->getData();
-        $produk     = $dataProduk['success'] ? $dataProduk['data'] : [];
+        $search = $this->request->getGet('search');
+        $limit  = $this->request->getGet('limit') ?? 100;
+        $page   = $this->request->getGet('page') ?? 1;
+        $offset = ($page - 1) * $limit;
+
+        $result = $this->produkService->getData($search, $limit, $offset);
 
         if ($this->isApi()) {
-            return $this->response->setStatusCode(200)->setJSON([
-                'success' => true,
-                'message' => 'Data produk berhasil diambil',
-                'code'    => 200,
-                'data'    => $produk,
+            return $this->apiResponse(true, 'Data produk berhasil diambil', 200, [
+                'data'  => $result['data'],
+                'total' => $result['total'] ?? count($result['data']),
+                'page'  => (int) $page,
+                'limit' => (int) $limit,
             ]);
         }
 
@@ -41,136 +71,117 @@ class Produk extends BaseController
             'page'       => 'produk',
             'title'      => 'Pulsa Io - Produk',
             'table_name' => 'Data Produk',
-            'produk'     => $produk,
+            'produk'     => $result['data'],
+            'search'     => $search,
         ]);
     }
 
     public function create()
     {
-        $dataKategori = $this->produkService->getDataKategori();
-        $dataSatuan   = $this->produkService->getDataSatuan();
+        $kategori = $this->produkService->getDataKategori();
+        $satuan   = $this->produkService->getDataSatuan();
 
         return view('produk/create', [
             'page'      => 'produk',
             'title'     => 'Pulsa Io - Tambah Produk',
             'form_name' => 'Form Tambah Produk',
-            'kategori'  => $dataKategori['data'] ?? [],
-            'satuan'    => $dataSatuan['data'] ?? [],
+            'kategori'  => $kategori['data'] ?? [],
+            'satuan'    => $satuan['data'] ?? [],
         ]);
     }
 
     public function store()
     {
-        $rules = $this->ruleValidation->ruleStore();
+        $data = $this->getRequestData();
+        unset($data['_method']);
 
-        if (!$this->validate($rules)) {
-            if ($this->isApi()) {
-                return $this->response->setStatusCode(422)->setJSON([
-                    'success' => false,
-                    'message' => 'Validasi gagal',
-                    'code'    => 422,
-                    'errors'  => $this->validator->getErrors(),
-                ]);
-            }
-            return redirect()->back()->withInput()->with('validation', Services::validation());
-        }
-
-        $data = [
-            'produk'   => $this->request->getPost('produk'),
-            'harga'    => $this->request->getPost('harga'),
-            'stok'     => $this->request->getPost('stok'),
-            'kategori' => $this->request->getPost('kategori'),
-            'satuan'   => $this->request->getPost('satuan'),
+        $rules = [
+            'produk'   => 'required',
+            'harga'    => 'required|numeric|greater_than[0]',
+            'stok'     => 'required|numeric|greater_than[0]',
+            'kategori' => 'required',
+            'satuan'   => 'required',
         ];
+
+        if (!$this->validateData($data, $rules)) {
+            if ($this->isApi()) {
+                return $this->apiResponse(false, 'Validasi gagal', 422, null, $this->validator->getErrors());
+            }
+            return redirect()->back()->withInput()->with('errors', $this->validator->getErrors());
+        }
 
         $result = $this->produkService->createData($data);
 
         if ($this->isApi()) {
-            return $this->response
-                ->setStatusCode($result['success'] ? 201 : 500)
-                ->setJSON([
-                    'success' => $result['success'],
-                    'message' => $result['message'],
-                    'code'    => $result['success'] ? 201 : 500,
-                ]);
+            return $this->apiResponse($result['success'], $result['message'], $result['success'] ? 201 : 500);
         }
 
-        return redirect()
-            ->to('/master-data/produk')
-            ->with($result['success'] ? 'success' : 'error', $result['message']);
+        return redirect()->to('/master-data/produk')->with($result['success'] ? 'success' : 'error', $result['message']);
     }
 
-    public function edit($id)
+    public function show($id)
     {
         $result = $this->produkService->getById($id);
 
         if ($this->isApi()) {
-            return $this->response
-                ->setStatusCode($result['success'] ? 200 : 404)
-                ->setJSON([
-                    'success' => $result['success'],
-                    'message' => $result['message'],
-                    'code'    => $result['success'] ? 200 : 404,
-                    'data'    => $result['data'] ?? null,
-                ]);
+            return $this->apiResponse(
+                $result['success'],
+                $result['message'],
+                $result['success'] ? 200 : 404,
+                $result['data'] ?? null
+            );
         }
+
+        return $this->edit($id);
+    }
+
+    public function edit($id)
+    {
+        $result   = $this->produkService->getById($id);
+        $kategori = $this->produkService->getDataKategori();
+        $satuan   = $this->produkService->getDataSatuan();
 
         if (!$result['success']) {
             return redirect()->to('/master-data/produk')->with('error', $result['message']);
         }
-
-        $dataKategori = $this->produkService->getDataKategori();
-        $dataSatuan   = $this->produkService->getDataSatuan();
 
         return view('produk/edit', [
             'page'      => 'produk',
             'title'     => 'Pulsa Io - Edit Produk',
             'form_name' => 'Form Edit Produk',
             'produk'    => $result['data'],
-            'kategori'  => $dataKategori['data'] ?? [],
-            'satuan'    => $dataSatuan['data'] ?? [],
+            'kategori'  => $kategori['data'] ?? [],
+            'satuan'    => $satuan['data'] ?? [],
         ]);
     }
 
     public function update($id)
     {
-        $rules = $this->ruleValidation->ruleUpdate();
+        $data = $this->getRequestData();
+        unset($data['_method']);
 
-        if (!$this->validate($rules)) {
-            if ($this->isApi()) {
-                return $this->response->setStatusCode(422)->setJSON([
-                    'success' => false,
-                    'message' => 'Validasi gagal',
-                    'code'    => 422,
-                    'errors'  => $this->validator->getErrors(),
-                ]);
-            }
-            return redirect()->back()->withInput()->with('validation', Services::validation());
-        }
-
-        $data = [
-            'produk'   => $this->request->getPost('produk'),
-            'harga'    => $this->request->getPost('harga'),
-            'stok'     => $this->request->getPost('stok'),
-            'kategori' => $this->request->getPost('kategori'),
-            'satuan'   => $this->request->getPost('satuan'),
+        $rules = [
+            'produk'   => 'required',
+            'harga'    => 'required|numeric|greater_than[0]',
+            'stok'     => 'required|numeric|greater_than[0]',
+            'kategori' => 'required',
+            'satuan'   => 'required',
         ];
+
+        if (!$this->validateData($data, $rules)) {
+            if ($this->isApi()) {
+                return $this->apiResponse(false, 'Validasi gagal', 422, null, $this->validator->getErrors());
+            }
+            return redirect()->back()->withInput()->with('errors', $this->validator->getErrors());
+        }
 
         $result = $this->produkService->updateData($id, $data);
 
         if ($this->isApi()) {
-            return $this->response
-                ->setStatusCode($result['success'] ? 200 : 500)
-                ->setJSON([
-                    'success' => $result['success'],
-                    'message' => $result['message'],
-                    'code'    => $result['success'] ? 200 : 500,
-                ]);
+            return $this->apiResponse($result['success'], $result['message'], $result['success'] ? 200 : 500);
         }
 
-        return redirect()
-            ->to('/master-data/produk')
-            ->with($result['success'] ? 'success' : 'error', $result['message']);
+        return redirect()->to('/master-data/produk')->with($result['success'] ? 'success' : 'error', $result['message']);
     }
 
     public function destroy($id)
@@ -183,8 +194,11 @@ class Produk extends BaseController
                 ->setJSON($result);
         }
 
-        return redirect()
-            ->to('/master-data/produk')
-            ->with($result['success'] ? 'success' : 'error', $result['message']);
+        return redirect()->to('/master-data/produk')->with($result['success'] ? 'success' : 'error', $result['message']);
+    }
+
+    public function delete($id)
+    {
+        return $this->destroy($id);
     }
 }

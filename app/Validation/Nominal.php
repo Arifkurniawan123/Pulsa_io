@@ -2,17 +2,8 @@
 
 namespace App\Validation;
 
-use App\Models\NominalModel;
-
 class Nominal
 {
-    protected $nominalModel;
-
-    public function __construct()
-    {
-        $this->nominalModel = new NominalModel();
-    }
-
     /**
      * Validation rules for store (create)
      */
@@ -20,34 +11,35 @@ class Nominal
     {
         return [
             'provider_id' => [
-                'rules'  => 'required|is_not_unique[tbl_provider_pulsa.id]',
+                'rules'  => 'required|integer|greater_than[0]',
                 'errors' => [
-                    'required' => 'Provider harus dipilih',
-                    'is_not_unique' => 'Provider tidak valid'
+                    'required'     => 'Provider harus dipilih',
+                    'integer'      => 'Provider tidak valid',
+                    'greater_than' => 'Provider tidak valid',
                 ]
             ],
             'nominal' => [
                 'rules'  => 'required|numeric|greater_than[0]',
                 'errors' => [
-                    'required' => 'Nominal harus diisi',
-                    'numeric' => 'Nominal harus berupa angka',
+                    'required'     => 'Nominal harus diisi',
+                    'numeric'      => 'Nominal harus berupa angka',
                     'greater_than' => 'Nominal harus lebih dari 0'
-                ]
-            ],
-            'harga_jual' => [
-                'rules'  => 'required|numeric|greater_than[0]',
-                'errors' => [
-                    'required' => 'Harga jual harus diisi',
-                    'numeric' => 'Harga jual harus berupa angka',
-                    'greater_than' => 'Harga jual harus lebih dari 0'
                 ]
             ],
             'harga_modal' => [
                 'rules'  => 'required|numeric|greater_than[0]',
                 'errors' => [
-                    'required' => 'Harga modal harus diisi',
-                    'numeric' => 'Harga modal harus berupa angka',
+                    'required'     => 'Harga modal harus diisi',
+                    'numeric'      => 'Harga modal harus berupa angka',
                     'greater_than' => 'Harga modal harus lebih dari 0'
+                ]
+            ],
+            'harga_jual' => [
+                'rules'  => 'required|numeric|greater_than[0]',
+                'errors' => [
+                    'required'     => 'Harga jual harus diisi',
+                    'numeric'      => 'Harga jual harus berupa angka',
+                    'greater_than' => 'Harga jual harus lebih dari 0'
                 ]
             ],
             'status' => [
@@ -67,34 +59,35 @@ class Nominal
     {
         return [
             'provider_id' => [
-                'rules'  => 'required|is_not_unique[tbl_provider_pulsa.id]',
+                'rules'  => 'required|integer|greater_than[0]',
                 'errors' => [
-                    'required' => 'Provider harus dipilih',
-                    'is_not_unique' => 'Provider tidak valid'
+                    'required'     => 'Provider harus dipilih',
+                    'integer'      => 'Provider tidak valid',
+                    'greater_than' => 'Provider tidak valid',
                 ]
             ],
             'nominal' => [
                 'rules'  => 'required|numeric|greater_than[0]',
                 'errors' => [
-                    'required' => 'Nominal harus diisi',
-                    'numeric' => 'Nominal harus berupa angka',
+                    'required'     => 'Nominal harus diisi',
+                    'numeric'      => 'Nominal harus berupa angka',
                     'greater_than' => 'Nominal harus lebih dari 0'
-                ]
-            ],
-            'harga_jual' => [
-                'rules'  => 'required|numeric|greater_than[0]',
-                'errors' => [
-                    'required' => 'Harga jual harus diisi',
-                    'numeric' => 'Harga jual harus berupa angka',
-                    'greater_than' => 'Harga jual harus lebih dari 0'
                 ]
             ],
             'harga_modal' => [
                 'rules'  => 'required|numeric|greater_than[0]',
                 'errors' => [
-                    'required' => 'Harga modal harus diisi',
-                    'numeric' => 'Harga modal harus berupa angka',
+                    'required'     => 'Harga modal harus diisi',
+                    'numeric'      => 'Harga modal harus berupa angka',
                     'greater_than' => 'Harga modal harus lebih dari 0'
+                ]
+            ],
+            'harga_jual' => [
+                'rules'  => 'required|numeric|greater_than[0]',
+                'errors' => [
+                    'required'     => 'Harga jual harus diisi',
+                    'numeric'      => 'Harga jual harus berupa angka',
+                    'greater_than' => 'Harga jual harus lebih dari 0'
                 ]
             ],
             'status' => [

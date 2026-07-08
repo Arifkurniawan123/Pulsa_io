@@ -19,6 +19,42 @@ class Provider extends BaseController
         return str_contains($this->request->getUri()->getPath(), 'api/');
     }
 
+    private function getRequestData(): array
+    {
+        $contentType = $this->request->getHeaderLine('Content-Type');
+
+        if (str_contains($contentType, 'application/json')) {
+            $json = $this->request->getJSON(true);
+            if (is_array($json) && !empty($json)) {
+                return $json;
+            }
+        }
+
+        $post = $this->request->getPost();
+        if (is_array($post) && !empty($post)) {
+            return $post;
+        }
+
+        // Untuk PUT dari API (form-urlencoded)
+        $raw = $this->request->getBody();
+        if (!empty($raw) && !str_contains($contentType, 'application/json')) {
+            parse_str($raw, $parsed);
+            if (is_array($parsed) && !empty($parsed)) {
+                return $parsed;
+            }
+        }
+
+        return [];
+    }
+
+    private function apiResponse($success, $message, $code, $data = null, $errors = null)
+    {
+        $response = ['success' => $success, 'message' => $message, 'code' => $code];
+        if ($data !== null) $response['data'] = $data;
+        if ($errors !== null) $response['errors'] = $errors;
+        return $this->response->setStatusCode($code)->setJSON($response);
+    }
+
     public function index()
     {
         $filters = [
@@ -30,12 +66,9 @@ class Provider extends BaseController
         $stats     = $this->providerService->getStats();
 
         if ($this->isApi()) {
-            return $this->response->setStatusCode(200)->setJSON([
-                'success' => true,
-                'message' => 'Data provider berhasil diambil',
-                'code'    => 200,
-                'data'    => $providers,
-                'stats'   => $stats,
+            return $this->apiResponse(true, 'Data provider berhasil diambil', 200, [
+                'providers' => $providers,
+                'stats'     => $stats,
             ]);
         }
 
@@ -47,14 +80,9 @@ class Provider extends BaseController
         ]);
     }
 
-    // ========== TAMBAHAN UNTUK FLUTTER ==========
-    /**
-     * Get only allowed providers (Telkomsel, XL, Indosat, Tri, Smartfren, Axis, by.U)
-     * Endpoint: GET /api/provider/allowed
-     */
     public function getAllowed()
     {
-        $allowedKode = ['TSEL', 'XL', 'ISAT', 'TRI', 'SMART', 'AXIS', 'BYU'];
+        $allowedKode   = ['TSEL', 'XL', 'ISAT', 'TRI', 'SMART', 'AXIS', 'BYU'];
         $providerModel = new \App\Models\ProviderModel();
         $data = $providerModel
             ->whereIn('kode_provider', $allowedKode)
@@ -62,13 +90,8 @@ class Provider extends BaseController
             ->orderBy('nama_provider', 'ASC')
             ->findAll();
 
-        return $this->response->setJSON([
-            'success' => true,
-            'message' => 'Data provider berhasil diambil',
-            'data'    => $data
-        ]);
+        return $this->apiResponse(true, 'Data provider berhasil diambil', 200, $data);
     }
-    // ==========================================
 
     public function create()
     {
@@ -80,17 +103,14 @@ class Provider extends BaseController
 
     public function store()
     {
-        $data   = $this->request->getPost();
+        $data = $this->getRequestData();
+        unset($data['_method']);
+
         $errors = $this->providerService->validateCreate($data);
 
         if (!empty($errors)) {
             if ($this->isApi()) {
-                return $this->response->setStatusCode(422)->setJSON([
-                    'success' => false,
-                    'message' => 'Validasi gagal',
-                    'code'    => 422,
-                    'errors'  => $errors,
-                ]);
+                return $this->apiResponse(false, 'Validasi gagal', 422, null, $errors);
             }
             return redirect()->back()->withInput()->with('errors', $errors);
         }
@@ -99,47 +119,30 @@ class Provider extends BaseController
             $this->providerService->create($data);
 
             if ($this->isApi()) {
-                return $this->response->setStatusCode(201)->setJSON([
-                    'success' => true,
-                    'message' => 'Provider berhasil ditambahkan',
-                    'code'    => 201,
-                ]);
+                return $this->apiResponse(true, 'Provider berhasil ditambahkan', 201);
             }
             return redirect()->to('/provider')->with('success', 'Provider berhasil ditambahkan');
         } catch (\Exception $e) {
             if ($this->isApi()) {
-                return $this->response->setStatusCode(500)->setJSON([
-                    'success' => false,
-                    'message' => $e->getMessage(),
-                    'code'    => 500,
-                ]);
+                return $this->apiResponse(false, $e->getMessage(), 500);
             }
             return redirect()->back()->withInput()->with('error', $e->getMessage());
         }
     }
 
-    public function edit($id)
+    public function show($id)
     {
         $provider = $this->providerService->find($id);
 
-        if ($this->isApi()) {
-            if (!$provider) {
-                return $this->response->setStatusCode(404)->setJSON([
-                    'success' => false,
-                    'message' => 'Provider tidak ditemukan',
-                    'code'    => 404,
-                ]);
+        if (!$provider) {
+            if ($this->isApi()) {
+                return $this->apiResponse(false, 'Provider tidak ditemukan', 404);
             }
-            return $this->response->setStatusCode(200)->setJSON([
-                'success' => true,
-                'message' => 'Data provider ditemukan',
-                'code'    => 200,
-                'data'    => $provider,
-            ]);
+            return redirect()->to('/provider')->with('error', 'Provider tidak ditemukan');
         }
 
-        if (!$provider) {
-            return redirect()->to('/provider')->with('error', 'Provider tidak ditemukan');
+        if ($this->isApi()) {
+            return $this->apiResponse(true, 'Data provider ditemukan', 200, $provider);
         }
 
         return view('provider/edit', [
@@ -149,32 +152,30 @@ class Provider extends BaseController
         ]);
     }
 
+    public function edit($id)
+    {
+        return $this->show($id);
+    }
+
     public function update($id)
     {
         $provider = $this->providerService->find($id);
 
         if (!$provider) {
             if ($this->isApi()) {
-                return $this->response->setStatusCode(404)->setJSON([
-                    'success' => false,
-                    'message' => 'Provider tidak ditemukan',
-                    'code'    => 404,
-                ]);
+                return $this->apiResponse(false, 'Provider tidak ditemukan', 404);
             }
             return redirect()->to('/provider')->with('error', 'Provider tidak ditemukan');
         }
 
-        $data   = $this->request->getPost();
+        $data = $this->getRequestData();
+        unset($data['_method']);
+
         $errors = $this->providerService->validateUpdate($data, $id);
 
         if (!empty($errors)) {
             if ($this->isApi()) {
-                return $this->response->setStatusCode(422)->setJSON([
-                    'success' => false,
-                    'message' => 'Validasi gagal',
-                    'code'    => 422,
-                    'errors'  => $errors,
-                ]);
+                return $this->apiResponse(false, 'Validasi gagal', 422, null, $errors);
             }
             return redirect()->back()->withInput()->with('errors', $errors);
         }
@@ -183,20 +184,12 @@ class Provider extends BaseController
             $this->providerService->update($id, $data);
 
             if ($this->isApi()) {
-                return $this->response->setStatusCode(200)->setJSON([
-                    'success' => true,
-                    'message' => 'Provider berhasil diupdate',
-                    'code'    => 200,
-                ]);
+                return $this->apiResponse(true, 'Provider berhasil diupdate', 200);
             }
             return redirect()->to('/provider')->with('success', 'Provider berhasil diupdate');
         } catch (\Exception $e) {
             if ($this->isApi()) {
-                return $this->response->setStatusCode(500)->setJSON([
-                    'success' => false,
-                    'message' => $e->getMessage(),
-                    'code'    => 500,
-                ]);
+                return $this->apiResponse(false, $e->getMessage(), 500);
             }
             return redirect()->back()->withInput()->with('error', $e->getMessage());
         }
@@ -212,8 +205,11 @@ class Provider extends BaseController
                 ->setJSON($result);
         }
 
-        return redirect()
-            ->to('/provider')
-            ->with($result['success'] ? 'success' : 'error', $result['message']);
+        return redirect()->to('/provider')->with($result['success'] ? 'success' : 'error', $result['message']);
+    }
+
+    public function destroy($id)
+    {
+        return $this->delete($id);
     }
 }

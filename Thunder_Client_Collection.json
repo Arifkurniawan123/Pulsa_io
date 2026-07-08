@@ -1,0 +1,325 @@
+{
+  "info": {
+    "name": "Aplikasi Pulsa - Topup E-Wallet & Bank API",
+    "description": "Testing collection untuk E-Wallet dan Bank Transfer API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"123456\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/login",
+          "host": ["{{base_url}}"],
+          "path": ["api", "login"]
+        }
+      }
+    },
+    {
+      "name": "E-Wallet - Get Supported Methods",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/topup-ewallet/supported-methods",
+          "host": ["{{base_url}}"],
+          "path": ["api", "topup-ewallet", "supported-methods"]
+        }
+      }
+    },
+    {
+      "name": "E-Wallet - Initiate Topup (DANA)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"metode_ewallet\": \"dana\",\n  \"nomor_telepon\": \"08123456789\",\n  \"nominal\": 50000\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/topup-ewallet/",
+          "host": ["{{base_url}}"],
+          "path": ["api", "topup-ewallet", ""]
+        }
+      }
+    },
+    {
+      "name": "E-Wallet - Initiate Topup (GCash)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"metode_ewallet\": \"gcash\",\n  \"nomor_telepon\": \"09123456789\",\n  \"nominal\": 75000\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/topup-ewallet/",
+          "host": ["{{base_url}}"],
+          "path": ["api", "topup-ewallet", ""]
+        }
+      }
+    },
+    {
+      "name": "E-Wallet - Confirm Payment",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/topup-ewallet/confirm/{{ewallet_ref_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "topup-ewallet", "confirm", "{{ewallet_ref_id}}"]
+        }
+      }
+    },
+    {
+      "name": "E-Wallet - Get History",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/topup-ewallet/history?limit=50&offset=0",
+          "host": ["{{base_url}}"],
+          "path": ["api", "topup-ewallet", "history"],
+          "query": [
+            {
+              "key": "limit",
+              "value": "50"
+            },
+            {
+              "key": "offset",
+              "value": "0"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Bank - Get Supported Banks",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/topup-bank/supported-banks",
+          "host": ["{{base_url}}"],
+          "path": ["api", "topup-bank", "supported-banks"]
+        }
+      }
+    },
+    {
+      "name": "Bank - Initiate Topup (BCA)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"nama_bank\": \"BCA\",\n  \"nomor_rekening\": \"1234567890\",\n  \"atas_nama\": \"Admin Test\",\n  \"nominal\": 100000\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/topup-bank/",
+          "host": ["{{base_url}}"],
+          "path": ["api", "topup-bank", ""]
+        }
+      }
+    },
+    {
+      "name": "Bank - Initiate Topup (Mandiri)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"nama_bank\": \"Mandiri\",\n  \"nomor_rekening\": \"9876543210\",\n  \"atas_nama\": \"Admin Test\",\n  \"nominal\": 150000\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/topup-bank/",
+          "host": ["{{base_url}}"],
+          "path": ["api", "topup-bank", ""]
+        }
+      }
+    },
+    {
+      "name": "Bank - Confirm Payment",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/topup-bank/confirm/{{bank_ref_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "topup-bank", "confirm", "{{bank_ref_id}}"]
+        }
+      }
+    },
+    {
+      "name": "Bank - Get History",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/topup-bank/history?limit=50&offset=0",
+          "host": ["{{base_url}}"],
+          "path": ["api", "topup-bank", "history"],
+          "query": [
+            {
+              "key": "limit",
+              "value": "50"
+            },
+            {
+              "key": "offset",
+              "value": "0"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Saldo - Get Current Balance",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/topup-saldo/saldo",
+          "host": ["{{base_url}}"],
+          "path": ["api", "topup-saldo", "saldo"]
+        }
+      }
+    },
+    {
+      "name": "Saldo - Get Topup History",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/topup-saldo/history",
+          "host": ["{{base_url}}"],
+          "path": ["api", "topup-saldo", "history"]
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "jwt_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ewallet_ref_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "bank_ref_id",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

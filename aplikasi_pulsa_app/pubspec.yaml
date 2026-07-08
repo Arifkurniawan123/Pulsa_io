@@ -10,6 +10,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  permission_handler: ^11.3.1
   image_picker: ^1.0.7
   provider: ^6.1.1
   dio: ^5.4.0
@@ -18,11 +19,24 @@ dependencies:
   excel: ^2.1.0
   path_provider: ^2.0.15
   cupertino_icons: ^1.0.8
+  share_plus: ^10.0.0   # ← ditambahkan untuk export Excel tanpa izin storage
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.13.1
 
 flutter:
   uses-material-design: true
+  
+  assets:
+    - assets/icon/
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/logo.jpg"
+  min_sdk_android: 21
+  adaptive_icon_background: "#6366f1"
+  adaptive_icon_foreground: "assets/icon/logo.jpg"

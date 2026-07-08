@@ -1,9 +1,11 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:excel/excel.dart' as excel;
 import 'package:dio/dio.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:path_provider/path_provider.dart';
 import '../services/api_service.dart';
-import '../utils/save_file.dart';
-import '../widgets/scanner_view.dart';
 import '../widgets/custom_sidebar.dart';
 
 class ScanPulsaScreen extends StatefulWidget {
@@ -31,7 +33,6 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
 
   bool _isLoading = false;
   bool _isSaving = false;
-  bool _scannerActive = true;
   bool _formExpanded = true;
 
   static const _metodeOptions = ['tunai', 'saldo', 'transfer', 'grip'];
@@ -68,7 +69,6 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
       if (res.statusCode == 200 && res.data['success'] == true) {
         final list = res.data['data'] as List? ?? [];
         setState(() => _providers = List<Map<String, dynamic>>.from(list));
-        debugPrint('Providers loaded: ${_providers.length}');
       } else {
         throw Exception('Gagal load providers');
       }
@@ -84,7 +84,6 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
       if (res.statusCode == 200 && res.data['success'] == true) {
         final list = res.data['data'] as List? ?? [];
         setState(() => _transactions = List<Map<String, dynamic>>.from(list));
-        debugPrint('Transactions loaded: ${_transactions.length}');
       } else {
         throw Exception('Gagal load transaksi');
       }
@@ -103,10 +102,8 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
           _nominals = List<Map<String, dynamic>>.from(list);
           _selectedNominalId = null;
         });
-        debugPrint('Nominals loaded: ${_nominals.length}');
       } else {
         setState(() => _nominals = []);
-        debugPrint('Error loading nominals: ${res.data['message']}');
       }
     } catch (e) {
       setState(() => _nominals = []);
@@ -114,18 +111,7 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
     }
   }
 
-  void _handleScan(String value) {
-    final parts = value.split(RegExp(r'[|,;:]'));
-    final nomor = parts.isNotEmpty ? parts[0].trim() : value.trim();
-    setState(() {
-      _nomorController.text = nomor;
-      _scannerActive = false;
-    });
-    _showSnack('✓ Scan berhasil: $nomor — Pilih provider & nominal', color: Colors.indigo);
-  }
-
   Future<void> _simpanEntry() async {
-    // Validasi form terlebih dahulu
     if (!_formKey.currentState!.validate()) {
       _showSnack('Form tidak valid, periksa input', color: Colors.red);
       return;
@@ -136,8 +122,6 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
       _showSnack('Nomor tujuan wajib diisi', color: Colors.red);
       return;
     }
-
-    // Pastikan provider dan nominal sudah dipilih
     if (_selectedProviderId == null) {
       _showSnack('Pilih provider terlebih dahulu', color: Colors.red);
       return;
@@ -146,13 +130,6 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
       _showSnack('Pilih nominal terlebih dahulu', color: Colors.red);
       return;
     }
-
-    // Debug: lihat nilai sebelum dikirim
-    print('🔍 DEBUG SIMPAN:');
-    print('   providerId = $_selectedProviderId (${_selectedProviderId.runtimeType})');
-    print('   nominalId = $_selectedNominalId (${_selectedNominalId.runtimeType})');
-    print('   metode = $_selectedMetode');
-    print('   noTujuan = $noTujuan');
 
     setState(() => _isSaving = true);
     try {
@@ -175,8 +152,6 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
         );
       }
 
-      print('✅ RESPONSE: ${res.statusCode} - ${res.data}');
-
       if (res.statusCode == 201 || res.statusCode == 200) {
         await _loadTransactions();
         _resetForm();
@@ -188,8 +163,6 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
         _showSnack(res.data['message'] ?? 'Gagal menyimpan', color: Colors.red);
       }
     } on DioException catch (e) {
-      print('❌ DIO ERROR: ${e.message}');
-      print('📄 RESPONSE DATA: ${e.response?.data}');
       _showSnack(e.response?.data['message'] ?? 'Koneksi gagal: ${e.message}', color: Colors.red);
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -215,7 +188,6 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
       _selectedNominalId = nominalId;
       _selectedMetode = transaction['metode_pembayaran'] ?? 'tunai';
       _selectedStatus = transaction['status'] ?? 'sukses';
-      _scannerActive = false;
       _formExpanded = true;
     });
     _showSnack('Mode edit aktif — ubah data lalu tekan Update', color: Colors.indigo);
@@ -262,58 +234,82 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
       _selectedStatus = 'sukses';
       _editingId = null;
       _nominals = [];
-      _scannerActive = true;
     });
   }
 
+  // ==================== EXPORT WITH SHARE ====================
   Future<void> _exportExcel() async {
     if (_transactions.isEmpty) {
       _showSnack('Tidak ada data untuk diekspor');
       return;
     }
+
     setState(() => _isSaving = true);
 
     try {
       final workbook = excel.Excel.createExcel();
       final sheet = workbook['Laporan Pulsa'];
-      final headers = [
-        'No', 'No Transaksi', 'Tanggal', 'Provider', 'Kasir',
-        'Nominal', 'No Tujuan', 'Harga Jual', 'Keuntungan', 'Metode', 'Status'
-      ];
-      for (int i = 0; i < headers.length; i++) {
-        sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0)).value = headers[i];
-      }
-
-      for (int i = 0; i < _transactions.length; i++) {
-        final t = _transactions[i];
-        final row = i + 1;
-        final tgl = t['created_at'] != null ? DateTime.parse(t['created_at']).toLocal() : DateTime.now();
-        final tglStr = '${tgl.day.toString().padLeft(2, '0')}/${tgl.month.toString().padLeft(2, '0')}/${tgl.year} ${tgl.hour.toString().padLeft(2, '0')}:${tgl.minute.toString().padLeft(2, '0')}';
-        sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value = row;
-        sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row)).value = t['no_transaksi'] ?? '-';
-        sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: row)).value = tglStr;
-        sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: row)).value = t['nama_provider'] ?? '-';
-        sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: row)).value = t['nama_user'] ?? 'Sistem';
-        sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: row)).value = t['nominal_paket'] ?? t['nominal'] ?? 0;
-        sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 6, rowIndex: row)).value = t['no_tujuan'] ?? '';
-        sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 7, rowIndex: row)).value = t['harga_jual'] ?? 0;
-        sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 8, rowIndex: row)).value = t['keuntungan'] ?? 0;
-        sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 9, rowIndex: row)).value = t['metode_pembayaran'] ?? '';
-        sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 10, rowIndex: row)).value = t['status'] ?? '';
-      }
-
+      _fillExcelSheet(sheet);
       final bytes = workbook.encode();
       if (bytes == null) {
         _showSnack('Gagal membuat file Excel', color: Colors.red);
         return;
       }
+
+      final directory = await getTemporaryDirectory();
       final filename = 'laporan_pulsa_${DateTime.now().millisecondsSinceEpoch}.xlsx';
-      await saveFileBytes(filename, bytes);
-      _showSnack('Export berhasil: $filename', color: Colors.green);
+      final file = File('${directory.path}/$filename');
+      await file.writeAsBytes(bytes);
+
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        text: 'Laporan Pulsa - Pulsa IO',
+        subject: 'Laporan Pulsa',
+      );
+
+      _showSnack('File siap dibagikan', color: Colors.green);
     } catch (e) {
       _showSnack('Gagal export: $e', color: Colors.red);
     } finally {
       if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  void _fillExcelSheet(excel.Sheet sheet) {
+    // Header
+    final headers = [
+      'No', 'No Transaksi', 'Tanggal', 'Provider', 'Kasir',
+      'Nominal', 'No Tujuan', 'Harga Jual', 'Keuntungan', 'Metode', 'Status'
+    ];
+    for (int i = 0; i < headers.length; i++) {
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0)).value = headers[i];
+    }
+
+    // Data
+    for (int i = 0; i < _transactions.length; i++) {
+      final t = _transactions[i];
+      final row = i + 1;
+
+      String tglStr = '-';
+      try {
+        if (t['created_at'] != null && t['created_at'].toString().isNotEmpty) {
+          final tgl = DateTime.parse(t['created_at'].toString()).toLocal();
+          tglStr = '${tgl.day.toString().padLeft(2, '0')}/${tgl.month.toString().padLeft(2, '0')}/${tgl.year} '
+              '${tgl.hour.toString().padLeft(2, '0')}:${tgl.minute.toString().padLeft(2, '0')}';
+        }
+      } catch (e) {}
+
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value = i + 1;
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row)).value = t['no_transaksi']?.toString() ?? '-';
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: row)).value = tglStr;
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: row)).value = t['nama_provider']?.toString() ?? '-';
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: row)).value = t['nama_user']?.toString() ?? 'Sistem';
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: row)).value = t['nominal_paket'] ?? t['nominal'] ?? 0;
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 6, rowIndex: row)).value = t['no_tujuan']?.toString() ?? '';
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 7, rowIndex: row)).value = t['harga_jual'] ?? 0;
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 8, rowIndex: row)).value = t['keuntungan'] ?? 0;
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 9, rowIndex: row)).value = t['metode_pembayaran']?.toString() ?? '';
+      sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 10, rowIndex: row)).value = t['status']?.toString() ?? '';
     }
   }
 
@@ -342,7 +338,9 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
   }
 
   String _formatCurrency(dynamic value) {
-    final v = value is num ? value : (value?.toString().isNotEmpty == true ? num.tryParse(value.toString()) ?? 0 : 0);
+    final v = value is num
+        ? value
+        : (value?.toString().isNotEmpty == true ? num.tryParse(value.toString()) ?? 0 : 0);
     return 'Rp ${v.toStringAsFixed(0).replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => '.')}';
   }
 
@@ -358,46 +356,26 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
     }
   }
 
-  Future<void> _onSidebarItemSelected(int index) async {
-    final roleId = await _api.getUserRole();
-    if (!mounted) return;
-    switch (index) {
-      case 0:
-        if (roleId == 2) Navigator.pushReplacementNamed(context, '/dashboard');
-        else Navigator.pushReplacementNamed(context, '/kasir');
-        break;
-      case 1:
-        Navigator.pushReplacementNamed(context, '/pulsa-provider');
-        break;
-      case 2:
-        Navigator.pushReplacementNamed(context, '/topup-saldo');
-        break;
-      case 3:
-        break;
-      case 4:
-        if (roleId == 2) Navigator.pushReplacementNamed(context, '/user');
-        else Navigator.pushReplacementNamed(context, '/history');
-        break;
-      case 5:
-        if (roleId == 2) Navigator.pushReplacementNamed(context, '/history');
-        break;
-      default:
-        _showSnack('Fitur belum tersedia');
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      drawer: CustomSidebar(selectedIndex: 3, onItemSelected: _onSidebarItemSelected),
+      drawer: const CustomSidebar(currentRoute: '/laporan-pulsa'),
       appBar: AppBar(
-        title: Text(_editingId != null ? 'Edit Laporan Pulsa' : 'Scan & Laporan Pulsa'),
+        title: Text(_editingId != null ? 'Edit Laporan Pulsa' : 'Laporan Pulsa'),
         actions: [
           IconButton(icon: const Icon(Icons.refresh), onPressed: _loadTransactions, tooltip: 'Refresh'),
           if (_transactions.isNotEmpty)
-            IconButton(icon: const Icon(Icons.file_download), onPressed: _isSaving ? null : _exportExcel, tooltip: 'Export Excel'),
+            IconButton(
+                icon: _isSaving
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.share),
+                onPressed: _isSaving ? null : _exportExcel,
+                tooltip: 'Export & Share Excel'),
           if (_transactions.isNotEmpty)
-            IconButton(icon: const Icon(Icons.delete_sweep, color: Colors.red), onPressed: _hapusSemua, tooltip: 'Hapus Semua'),
+            IconButton(
+                icon: const Icon(Icons.delete_sweep, color: Colors.red),
+                onPressed: _hapusSemua,
+                tooltip: 'Hapus Semua'),
         ],
       ),
       body: _isLoading
@@ -416,12 +394,19 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                           child: Row(
                             children: [
-                              Icon(_editingId != null ? Icons.edit : Icons.add_circle,
-                                  color: _editingId != null ? Colors.orange : const Color(0xFF6366f1), size: 20),
+                              Icon(
+                                _editingId != null ? Icons.edit : Icons.add_circle,
+                                color: _editingId != null ? Colors.orange : const Color(0xFF6366f1),
+                                size: 20,
+                              ),
                               const SizedBox(width: 8),
-                              Text(_editingId != null ? 'Edit Transaksi' : 'Tambah Transaksi Baru',
-                                  style: TextStyle(fontWeight: FontWeight.bold,
-                                      color: _editingId != null ? Colors.orange.shade800 : const Color(0xFF6366f1))),
+                              Text(
+                                _editingId != null ? 'Edit Transaksi' : 'Tambah Transaksi Baru',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: _editingId != null ? Colors.orange.shade800 : const Color(0xFF6366f1),
+                                ),
+                              ),
                               const Spacer(),
                               Icon(_formExpanded ? Icons.expand_less : Icons.expand_more, color: Colors.grey),
                             ],
@@ -435,37 +420,6 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
                             key: _formKey,
                             child: Column(
                               children: [
-                                if (_scannerActive && _editingId == null) ...[
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: SizedBox(height: 180, child: ScannerView(onDetect: _handleScan)),
-                                  ),
-                                  const SizedBox(height: 10),
-                                ] else if (_editingId == null) ...[
-                                  Container(
-                                    height: 56,
-                                    decoration: BoxDecoration(
-                                      color: Colors.grey.shade100,
-                                      borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(color: Colors.grey.shade300),
-                                    ),
-                                    child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        const Icon(Icons.pause_circle, color: Colors.grey),
-                                        const SizedBox(width: 8),
-                                        const Text('Scanner dijeda', style: TextStyle(color: Colors.grey)),
-                                        const SizedBox(width: 16),
-                                        TextButton(
-                                          onPressed: () => setState(() => _scannerActive = true),
-                                          child: const Text('Aktifkan'),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                ],
-                                // Baris 1: No Tujuan & Provider
                                 Row(
                                   children: [
                                     Expanded(
@@ -497,7 +451,9 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
                                         items: _providers.isEmpty
                                             ? [const DropdownMenuItem<int>(value: null, child: Text('Tidak ada provider'))]
                                             : _providers.map((p) {
-                                                final id = p['id'] is int ? p['id'] as int : int.tryParse(p['id']?.toString() ?? '') ?? 0;
+                                                final id = p['id'] is int
+                                                    ? p['id'] as int
+                                                    : int.tryParse(p['id']?.toString() ?? '') ?? 0;
                                                 return DropdownMenuItem<int>(
                                                   value: id,
                                                   child: Text(p['nama_provider'] ?? 'Unknown'),
@@ -515,7 +471,6 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
                                   ],
                                 ),
                                 const SizedBox(height: 10),
-                                // Baris 2: Nominal & Metode & Status (jika edit)
                                 Row(
                                   children: [
                                     Expanded(
@@ -532,7 +487,9 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
                                         items: _nominals.isEmpty
                                             ? [const DropdownMenuItem<int>(value: null, child: Text('Pilih provider dulu'))]
                                             : _nominals.map((n) {
-                                                final id = n['id'] is int ? n['id'] as int : int.tryParse(n['id']?.toString() ?? '') ?? 0;
+                                                final id = n['id'] is int
+                                                    ? n['id'] as int
+                                                    : int.tryParse(n['id']?.toString() ?? '') ?? 0;
                                                 final nom = n['nominal']?.toString() ?? '0';
                                                 final harga = n['harga_jual']?.toString() ?? '0';
                                                 return DropdownMenuItem<int>(
@@ -554,8 +511,11 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
                                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                                           isDense: true,
                                         ),
-                                        items: _metodeOptions.map((m) => DropdownMenuItem(
-                                            value: m, child: Text(m[0].toUpperCase() + m.substring(1)))).toList(),
+                                        items: _metodeOptions
+                                            .map((m) => DropdownMenuItem(
+                                                value: m,
+                                                child: Text(m[0].toUpperCase() + m.substring(1))))
+                                            .toList(),
                                         onChanged: (v) => setState(() => _selectedMetode = v ?? 'tunai'),
                                       ),
                                     ),
@@ -570,8 +530,11 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
                                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                                             isDense: true,
                                           ),
-                                          items: _statusOptions.map((s) => DropdownMenuItem(
-                                              value: s, child: Text(s[0].toUpperCase() + s.substring(1)))).toList(),
+                                          items: _statusOptions
+                                              .map((s) => DropdownMenuItem(
+                                                  value: s,
+                                                  child: Text(s[0].toUpperCase() + s.substring(1))))
+                                              .toList(),
                                           onChanged: (v) => setState(() => _selectedStatus = v ?? 'sukses'),
                                         ),
                                       ),
@@ -585,12 +548,16 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
                                       child: ElevatedButton.icon(
                                         onPressed: _isSaving ? null : _simpanEntry,
                                         icon: _isSaving
-                                            ? const SizedBox(width: 16, height: 16,
-                                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                            ? const SizedBox(
+                                                width: 16,
+                                                height: 16,
+                                                child: CircularProgressIndicator(
+                                                    strokeWidth: 2, color: Colors.white))
                                             : Icon(_editingId != null ? Icons.save : Icons.add),
                                         label: Text(_editingId != null ? 'Update' : 'Simpan ke Laporan'),
                                         style: ElevatedButton.styleFrom(
-                                          backgroundColor: _editingId != null ? Colors.orange : const Color(0xFF6366f1),
+                                          backgroundColor:
+                                              _editingId != null ? Colors.orange : const Color(0xFF6366f1),
                                           foregroundColor: Colors.white,
                                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                         ),
@@ -618,13 +585,16 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
                   padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    border: Border(top: BorderSide(color: Colors.grey.shade300), bottom: BorderSide(color: Colors.grey.shade200)),
+                    border: Border(
+                        top: BorderSide(color: Colors.grey.shade300),
+                        bottom: BorderSide(color: Colors.grey.shade200)),
                   ),
                   child: Row(
                     children: [
                       const Icon(Icons.table_chart, color: Color(0xFF6366f1), size: 18),
                       const SizedBox(width: 6),
-                      const Text('Laporan Penjualan Pulsa', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      const Text('Laporan Penjualan Pulsa',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                       const Spacer(),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
@@ -632,8 +602,11 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
                           color: const Color(0xFF6366f1).withOpacity(0.1),
                           borderRadius: BorderRadius.circular(20),
                         ),
-                        child: Text('${_transactions.length} transaksi',
-                            style: const TextStyle(color: Color(0xFF6366f1), fontSize: 11, fontWeight: FontWeight.w600)),
+                        child: Text(
+                          '${_transactions.length} transaksi',
+                          style: const TextStyle(
+                              color: Color(0xFF6366f1), fontSize: 11, fontWeight: FontWeight.w600),
+                        ),
                       ),
                     ],
                   ),
@@ -647,9 +620,10 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
                             children: [
                               Icon(Icons.receipt_long, size: 60, color: Colors.grey.shade300),
                               const SizedBox(height: 12),
-                              Text('Belum ada data laporan', style: TextStyle(color: Colors.grey.shade500, fontSize: 15)),
+                              Text('Belum ada data laporan',
+                                  style: TextStyle(color: Colors.grey.shade500, fontSize: 15)),
                               const SizedBox(height: 4),
-                              Text('Scan atau input manual untuk mencatat',
+                              Text('Input manual untuk mencatat transaksi',
                                   style: TextStyle(color: Colors.grey.shade400, fontSize: 12)),
                             ],
                           ),
@@ -684,11 +658,15 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
                                 rows: List.generate(_transactions.length, (i) {
                                   final t = _transactions[i];
                                   final tgl = t['created_at'] != null
-                                      ? DateTime.parse(t['created_at']).toLocal()
+                                      ? DateTime.parse(t['created_at'].toString()).toLocal()
                                       : DateTime.now();
-                                  final tglStr = '${tgl.day.toString().padLeft(2, '0')}/${tgl.month.toString().padLeft(2, '0')} ${tgl.hour.toString().padLeft(2, '0')}:${tgl.minute.toString().padLeft(2, '0')}';
+                                  final tglStr =
+                                      '${tgl.day.toString().padLeft(2, '0')}/${tgl.month.toString().padLeft(2, '0')} '
+                                      '${tgl.hour.toString().padLeft(2, '0')}:${tgl.minute.toString().padLeft(2, '0')}';
                                   final nominalValue = t['nominal_paket'] ?? t['nominal'] ?? 0;
-                                  final id = t['id'] is int ? t['id'] : int.tryParse(t['id']?.toString() ?? '') ?? 0;
+                                  final id = t['id'] is int
+                                      ? t['id']
+                                      : int.tryParse(t['id']?.toString() ?? '') ?? 0;
 
                                   return DataRow(
                                     color: WidgetStateProperty.resolveWith((states) {
@@ -697,17 +675,22 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
                                     }),
                                     cells: [
                                       DataCell(Text('${i + 1}', style: const TextStyle(color: Colors.grey))),
-                                      DataCell(Text(t['no_transaksi'] ?? '-', style: const TextStyle(fontWeight: FontWeight.w500))),
+                                      DataCell(Text(t['no_transaksi'] ?? '-',
+                                          style: const TextStyle(fontWeight: FontWeight.w500))),
                                       DataCell(Text(tglStr, style: const TextStyle(fontSize: 11))),
                                       DataCell(Text(t['nama_provider'] ?? '-')),
                                       DataCell(Text(t['nama_user'] ?? 'Sistem')),
-                                      DataCell(Text('Rp ${nominalValue.toString().replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => '.')}',
-                                          style: const TextStyle(fontWeight: FontWeight.w600))),
+                                      DataCell(Text(
+                                        'Rp ${nominalValue.toString().replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => '.')}',
+                                        style: const TextStyle(fontWeight: FontWeight.w600),
+                                      )),
                                       DataCell(Text(t['no_tujuan'] ?? '')),
                                       DataCell(Text(_formatCurrency(t['harga_jual']),
-                                          style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF6366f1)))),
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.w600, color: Color(0xFF6366f1)))),
                                       DataCell(Text(_formatCurrency(t['keuntungan']),
-                                          style: const TextStyle(color: Colors.green, fontWeight: FontWeight.w500))),
+                                          style: const TextStyle(
+                                              color: Colors.green, fontWeight: FontWeight.w500))),
                                       DataCell(Text(t['metode_pembayaran']?.toString().toUpperCase() ?? '-')),
                                       DataCell(Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -718,16 +701,18 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
                                         child: Text(
                                           (t['status'] ?? 'proses').toUpperCase(),
                                           style: TextStyle(
-                                              color: _statusColor(t['status'] ?? 'proses'),
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w600),
+                                            color: _statusColor(t['status'] ?? 'proses'),
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                          ),
                                         ),
                                       )),
                                       DataCell(Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
                                           IconButton(
-                                            icon: const Icon(Icons.edit, color: Color(0xFF6366f1), size: 18),
+                                            icon: const Icon(Icons.edit,
+                                                color: Color(0xFF6366f1), size: 18),
                                             onPressed: () => _editEntry(t),
                                             tooltip: 'Edit',
                                             padding: EdgeInsets.zero,
@@ -735,7 +720,8 @@ class _ScanPulsaScreenState extends State<ScanPulsaScreen> {
                                           ),
                                           const SizedBox(width: 8),
                                           IconButton(
-                                            icon: const Icon(Icons.delete, color: Colors.red, size: 18),
+                                            icon: const Icon(Icons.delete,
+                                                color: Colors.red, size: 18),
                                             onPressed: () => _hapusEntry(id),
                                             tooltip: 'Hapus',
                                             padding: EdgeInsets.zero,

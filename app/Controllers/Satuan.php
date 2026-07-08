@@ -3,19 +3,15 @@
 namespace App\Controllers;
 
 use App\Controllers\BaseController;
-use App\Services\Satuan as ServicesSatuan;
-use App\Validation\Satuan as ValidationSatuan;
-use Config\Services;
+use App\Services\Satuan as SatuanService;
 
 class Satuan extends BaseController
 {
     protected $satuanService;
-    protected $ruleValidation;
 
     public function __construct()
     {
-        $this->satuanService  = new ServicesSatuan();
-        $this->ruleValidation = new ValidationSatuan();
+        $this->satuanService = new SatuanService();
     }
 
     private function isApi(): bool
@@ -23,17 +19,51 @@ class Satuan extends BaseController
         return str_contains($this->request->getUri()->getPath(), 'api/');
     }
 
+    private function getRequestData(): array
+    {
+        $contentType = $this->request->getHeaderLine('Content-Type');
+
+        if (str_contains($contentType, 'application/json')) {
+            $json = $this->request->getJSON(true);
+            if (is_array($json) && !empty($json)) {
+                return $json;
+            }
+        }
+
+        $post = $this->request->getPost();
+        if (is_array($post) && !empty($post)) {
+            return $post;
+        }
+
+        return [];
+    }
+
+    private function apiResponse($success, $message, $code, $data = null, $errors = null)
+    {
+        $response = ['success' => $success, 'message' => $message, 'code' => $code];
+        if ($data !== null) $response['data'] = $data;
+        if ($errors !== null) $response['errors'] = $errors;
+        return $this->response->setStatusCode($code)->setJSON($response);
+    }
+
+    // ================================================================
+    // INDEX - SUPPORT SEARCH
+    // ================================================================
     public function index()
     {
-        $dataSatuan = $this->satuanService->getData();
-        $satuan     = $dataSatuan['success'] ? $dataSatuan['data'] : [];
+        $search = $this->request->getGet('search');
+        $limit  = $this->request->getGet('limit') ?? 100;
+        $page   = $this->request->getGet('page') ?? 1;
+        $offset = ($page - 1) * $limit;
+
+        $result = $this->satuanService->getData($search, $limit, $offset);
 
         if ($this->isApi()) {
-            return $this->response->setStatusCode(200)->setJSON([
-                'success' => true,
-                'message' => 'Data satuan berhasil diambil',
-                'code'    => 200,
-                'data'    => $satuan,
+            return $this->apiResponse(true, 'Data satuan berhasil diambil', 200, [
+                'data'  => $result['data'],
+                'total' => $result['total'] ?? count($result['data']),
+                'page'  => (int) $page,
+                'limit' => (int) $limit,
             ]);
         }
 
@@ -41,7 +71,8 @@ class Satuan extends BaseController
             'page'       => 'satuan',
             'title'      => 'Pulsa Io - Satuan',
             'table_name' => 'Data Satuan',
-            'satuan'     => $satuan,
+            'satuan'     => $result['data'],
+            'search'     => $search,
         ]);
     }
 
@@ -56,31 +87,20 @@ class Satuan extends BaseController
 
     public function store()
     {
-        $rules = $this->ruleValidation->ruleStore();
+        $data = $this->getRequestData();
+        unset($data['_method']);
 
-        if (!$this->validate($rules)) {
+        if (empty($data['satuan'])) {
             if ($this->isApi()) {
-                return $this->response->setStatusCode(422)->setJSON([
-                    'success' => false,
-                    'message' => 'Validasi gagal',
-                    'code'    => 422,
-                    'errors'  => $this->validator->getErrors(),
-                ]);
+                return $this->apiResponse(false, 'Nama satuan harus diisi', 422);
             }
-            return redirect()->back()->withInput()->with('validation', Services::validation());
+            return redirect()->back()->withInput()->with('error', 'Nama satuan harus diisi');
         }
 
-        $data   = ['satuan' => $this->request->getPost('satuan')];
         $result = $this->satuanService->createData($data);
 
         if ($this->isApi()) {
-            return $this->response
-                ->setStatusCode($result['success'] ? 201 : 500)
-                ->setJSON([
-                    'success' => $result['success'],
-                    'message' => $result['message'],
-                    'code'    => $result['success'] ? 201 : 500,
-                ]);
+            return $this->apiResponse($result['success'], $result['message'], $result['success'] ? 201 : 500);
         }
 
         if (!$result['success']) {
@@ -89,20 +109,23 @@ class Satuan extends BaseController
         return redirect()->to('/master-data/satuan')->with('success', $result['message']);
     }
 
-    public function edit($id)
+    public function show($id)
     {
         $result = $this->satuanService->getById($id);
 
         if ($this->isApi()) {
-            return $this->response
-                ->setStatusCode($result['success'] ? 200 : 404)
-                ->setJSON([
-                    'success' => $result['success'],
-                    'message' => $result['message'],
-                    'code'    => $result['success'] ? 200 : 404,
-                    'data'    => $result['data'] ?? null,
-                ]);
+            if (!$result['success']) {
+                return $this->apiResponse(false, $result['message'], 404);
+            }
+            return $this->apiResponse(true, 'Data ditemukan', 200, $result['data']);
         }
+
+        return $this->edit($id);
+    }
+
+    public function edit($id)
+    {
+        $result = $this->satuanService->getById($id);
 
         if (!$result['success']) {
             return redirect()->to('/master-data/satuan')->with('error', $result['message']);
@@ -118,31 +141,20 @@ class Satuan extends BaseController
 
     public function update($id)
     {
-        $rules = $this->ruleValidation->ruleUpdate($id);
+        $data = $this->getRequestData();
+        unset($data['_method']);
 
-        if (!$this->validate($rules)) {
+        if (empty($data['satuan'])) {
             if ($this->isApi()) {
-                return $this->response->setStatusCode(422)->setJSON([
-                    'success' => false,
-                    'message' => 'Validasi gagal',
-                    'code'    => 422,
-                    'errors'  => $this->validator->getErrors(),
-                ]);
+                return $this->apiResponse(false, 'Nama satuan harus diisi', 422);
             }
-            return redirect()->back()->withInput()->with('validation', Services::validation());
+            return redirect()->back()->withInput()->with('error', 'Nama satuan harus diisi');
         }
 
-        $data   = ['satuan' => $this->request->getPost('satuan')];
         $result = $this->satuanService->updateData($id, $data);
 
         if ($this->isApi()) {
-            return $this->response
-                ->setStatusCode($result['success'] ? 200 : 500)
-                ->setJSON([
-                    'success' => $result['success'],
-                    'message' => $result['message'],
-                    'code'    => $result['success'] ? 200 : 500,
-                ]);
+            return $this->apiResponse($result['success'], $result['message'], $result['success'] ? 200 : 500);
         }
 
         if (!$result['success']) {
@@ -154,9 +166,11 @@ class Satuan extends BaseController
     public function destroy($id)
     {
         $result = $this->satuanService->deleteData($id);
+        return $this->response->setStatusCode($result['code'])->setJSON($result);
+    }
 
-        return $this->response
-            ->setStatusCode($result['code'])
-            ->setJSON($result);
+    public function delete($id)
+    {
+        return $this->destroy($id);
     }
 }

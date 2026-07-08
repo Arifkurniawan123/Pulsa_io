@@ -70,37 +70,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return 0;
   }
 
-  void _onSidebarItemSelected(int index) async {
-    final roleId = await _api.getUserRole();
-    switch (index) {
-      case 0:
-        // sudah di dashboard
-        break;
-      case 1:
-        Navigator.pushReplacementNamed(context, '/pulsa-provider');
-        break;
-      case 2:
-        Navigator.pushReplacementNamed(context, '/topup-saldo');
-        break;
-      case 3:
-        Navigator.pushReplacementNamed(context, '/scan-pulsa');
-        break;
-      case 4:
-        if (roleId == 2) {
-          Navigator.pushReplacementNamed(context, '/user');
-        }
-        break;
-      case 5:
-        if (roleId == 2) {
-          Navigator.pushReplacementNamed(context, '/history');
-        }
-        break;
-    default:
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Fitur belum tersedia')),
-      );
-  }
-}
+
 
   @override
   Widget build(BuildContext context) {
@@ -109,7 +79,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         title: 'Dashboard',
         actions: [IconButton(icon: const Icon(Icons.refresh), onPressed: _loadDashboard)],
       ),
-      drawer: CustomSidebar(selectedIndex: 0, onItemSelected: _onSidebarItemSelected),
+      drawer: const CustomSidebar(currentRoute: '/dashboard'),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _error.isNotEmpty

@@ -322,7 +322,7 @@ class _TopupSaldoScreenState extends State<TopupSaldoScreen> {
         // sudah di topup saldo
         break;
       case 3:
-        Navigator.pushReplacementNamed(context, '/scan-pulsa');
+        Navigator.pushReplacementNamed(context, '/laporan-pulsa');
         break;
       case 4:
         if (roleId == 2) {
@@ -346,7 +346,7 @@ class _TopupSaldoScreenState extends State<TopupSaldoScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      drawer: CustomSidebar(selectedIndex: 2, onItemSelected: _onSidebarItemSelected),
+      drawer: const CustomSidebar(currentRoute: '/topup-saldo'),
       appBar: AppBar(title: const Text('Top-up Saldo')),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())

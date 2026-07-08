@@ -19,6 +19,44 @@ class Nominal extends BaseController
         return str_contains($this->request->getUri()->getPath(), 'api/');
     }
 
+    private function getRequestData(): array
+    {
+        $contentType = $this->request->getHeaderLine('Content-Type');
+
+        if (str_contains($contentType, 'application/json')) {
+            $json = $this->request->getJSON(true);
+            if (is_array($json) && !empty($json)) {
+                return $json;
+            }
+        }
+
+        $post = $this->request->getPost();
+        if (is_array($post) && !empty($post)) {
+            return $post;
+        }
+
+        $raw = $this->request->getBody();
+        if (!empty($raw) && !str_contains($contentType, 'application/json')) {
+            parse_str($raw, $parsed);
+            if (is_array($parsed) && !empty($parsed)) {
+                return $parsed;
+            }
+        }
+
+        return [];
+    }
+
+    private function apiResponse($success, $message, $code, $data = null, $errors = null)
+    {
+        $response = ['success' => $success, 'message' => $message, 'code' => $code];
+        if ($data !== null) $response['data'] = $data;
+        if ($errors !== null) $response['errors'] = $errors;
+        return $this->response->setStatusCode($code)->setJSON($response);
+    }
+
+    // ================================================================
+    // GET ALL + FILTER (HANYA DATA NOMINAL)
+    // ================================================================
     public function index()
     {
         $filters = [
@@ -27,20 +65,16 @@ class Nominal extends BaseController
             'status'      => $this->request->getGet('status'),
         ];
 
-        $nominals  = $this->nominalService->getAll($filters);
-        $providers = $this->nominalService->getActiveProviders();
-        $stats     = $this->nominalService->getStats();
+        // 🔥 AMBIL DATA NOMINAL SAJA
+        $nominals = $this->nominalService->getAll($filters);
 
         if ($this->isApi()) {
-            return $this->response->setStatusCode(200)->setJSON([
-                'success'   => true,
-                'message'   => 'Data nominal berhasil diambil',
-                'code'      => 200,
-                'data'      => $nominals,
-                'providers' => $providers,
-                'stats'     => $stats,
-            ]);
+            return $this->apiResponse(true, 'Data nominal berhasil diambil', 200, $nominals);
         }
+
+        // 🔥 UNTUK WEB TETAP PAKAI PROVIDERS & STATS (KARENA BUTUH DROPDOWN)
+        $providers = $this->nominalService->getActiveProviders();
+        $stats     = $this->nominalService->getStats();
 
         return view('nominal/index', [
             'title'     => 'Data Nominal Pulsa',
@@ -51,11 +85,9 @@ class Nominal extends BaseController
         ]);
     }
 
-    // ========== TAMBAHAN UNTUK FLUTTER ==========
-    /**
-     * Get nominal by provider_id
-     * Endpoint: GET /api/nominal/provider/{provider_id}
-     */
+    // ================================================================
+    // GET BY PROVIDER (TETAP ADA UNTUK DROPDOWN)
+    // ================================================================
     public function getByProvider($providerId)
     {
         $nominalModel = new \App\Models\NominalModel();
@@ -65,22 +97,29 @@ class Nominal extends BaseController
             ->orderBy('nominal', 'ASC')
             ->findAll();
 
-        if (empty($data)) {
-            return $this->response->setJSON([
-                'success' => false,
-                'message' => 'Data nominal tidak ditemukan',
-                'data'    => []
-            ]);
+        return $this->apiResponse(true, 'Data nominal berhasil diambil', 200, $data);
+    }
+
+    // ================================================================
+    // GET BY ID
+    // ================================================================
+    public function show($id)
+    {
+        $nominal = $this->nominalService->find($id);
+
+        if ($this->isApi()) {
+            if (!$nominal) {
+                return $this->apiResponse(false, 'Data nominal tidak ditemukan', 404);
+            }
+            return $this->apiResponse(true, 'Data nominal ditemukan', 200, $nominal);
         }
 
-        return $this->response->setJSON([
-            'success' => true,
-            'message' => 'Data nominal berhasil diambil',
-            'data'    => $data
-        ]);
+        return $this->edit($id);
     }
-    // ==========================================
 
+    // ================================================================
+    // CREATE (GET Form)
+    // ================================================================
     public function create()
     {
         return view('nominal/create', [
@@ -90,19 +129,19 @@ class Nominal extends BaseController
         ]);
     }
 
+    // ================================================================
+    // STORE (POST)
+    // ================================================================
     public function store()
     {
-        $data   = $this->request->getPost();
+        $data = $this->getRequestData();
+        unset($data['_method']);
+
         $errors = $this->nominalService->validateCreate($data);
 
         if (!empty($errors)) {
             if ($this->isApi()) {
-                return $this->response->setStatusCode(422)->setJSON([
-                    'success' => false,
-                    'message' => 'Validasi gagal',
-                    'code'    => 422,
-                    'errors'  => $errors,
-                ]);
+                return $this->apiResponse(false, 'Validasi gagal', 422, null, $errors);
             }
             return redirect()->back()->withInput()->with('errors', $errors);
         }
@@ -111,44 +150,23 @@ class Nominal extends BaseController
             $this->nominalService->create($data);
 
             if ($this->isApi()) {
-                return $this->response->setStatusCode(201)->setJSON([
-                    'success' => true,
-                    'message' => 'Data nominal berhasil ditambahkan',
-                    'code'    => 201,
-                ]);
+                return $this->apiResponse(true, 'Data nominal berhasil ditambahkan', 201);
             }
             return redirect()->to('/nominal')->with('success', 'Data nominal berhasil ditambahkan');
         } catch (\Exception $e) {
             if ($this->isApi()) {
-                return $this->response->setStatusCode(500)->setJSON([
-                    'success' => false,
-                    'message' => $e->getMessage(),
-                    'code'    => 500,
-                ]);
+                return $this->apiResponse(false, $e->getMessage(), 500);
             }
             return redirect()->back()->withInput()->with('error', $e->getMessage());
         }
     }
 
+    // ================================================================
+    // EDIT (GET Form)
+    // ================================================================
     public function edit($id)
     {
         $nominal = $this->nominalService->find($id);
-
-        if ($this->isApi()) {
-            if (!$nominal) {
-                return $this->response->setStatusCode(404)->setJSON([
-                    'success' => false,
-                    'message' => 'Data nominal tidak ditemukan',
-                    'code'    => 404,
-                ]);
-            }
-            return $this->response->setStatusCode(200)->setJSON([
-                'success' => true,
-                'message' => 'Data nominal ditemukan',
-                'code'    => 200,
-                'data'    => $nominal,
-            ]);
-        }
 
         if (!$nominal) {
             return redirect()->to('/nominal')->with('error', 'Data nominal tidak ditemukan');
@@ -162,32 +180,28 @@ class Nominal extends BaseController
         ]);
     }
 
+    // ================================================================
+    // UPDATE (PUT)
+    // ================================================================
     public function update($id)
     {
         $nominal = $this->nominalService->findBasic($id);
 
         if (!$nominal) {
             if ($this->isApi()) {
-                return $this->response->setStatusCode(404)->setJSON([
-                    'success' => false,
-                    'message' => 'Data nominal tidak ditemukan',
-                    'code'    => 404,
-                ]);
+                return $this->apiResponse(false, 'Data nominal tidak ditemukan', 404);
             }
             return redirect()->to('/nominal')->with('error', 'Data nominal tidak ditemukan');
         }
 
-        $data   = $this->request->getPost();
+        $data = $this->getRequestData();
+        unset($data['_method']);
+
         $errors = $this->nominalService->validateUpdate($data, $id);
 
         if (!empty($errors)) {
             if ($this->isApi()) {
-                return $this->response->setStatusCode(422)->setJSON([
-                    'success' => false,
-                    'message' => 'Validasi gagal',
-                    'code'    => 422,
-                    'errors'  => $errors,
-                ]);
+                return $this->apiResponse(false, 'Validasi gagal', 422, null, $errors);
             }
             return redirect()->back()->withInput()->with('errors', $errors);
         }
@@ -196,25 +210,20 @@ class Nominal extends BaseController
             $this->nominalService->update($id, $data);
 
             if ($this->isApi()) {
-                return $this->response->setStatusCode(200)->setJSON([
-                    'success' => true,
-                    'message' => 'Data nominal berhasil diupdate',
-                    'code'    => 200,
-                ]);
+                return $this->apiResponse(true, 'Data nominal berhasil diupdate', 200);
             }
             return redirect()->to('/nominal')->with('success', 'Data nominal berhasil diupdate');
         } catch (\Exception $e) {
             if ($this->isApi()) {
-                return $this->response->setStatusCode(500)->setJSON([
-                    'success' => false,
-                    'message' => $e->getMessage(),
-                    'code'    => 500,
-                ]);
+                return $this->apiResponse(false, $e->getMessage(), 500);
             }
             return redirect()->back()->withInput()->with('error', $e->getMessage());
         }
     }
 
+    // ================================================================
+    // DELETE
+    // ================================================================
     public function delete($id)
     {
         $result = $this->nominalService->deleteData($id);
@@ -228,5 +237,10 @@ class Nominal extends BaseController
         return redirect()
             ->to('/nominal')
             ->with($result['success'] ? 'success' : 'error', $result['message']);
+    }
+
+    public function destroy($id)
+    {
+        return $this->delete($id);
     }
 }

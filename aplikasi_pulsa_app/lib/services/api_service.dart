@@ -9,7 +9,7 @@ class ApiService {
     _setupDio();
   }
 
-  static const String baseUrl = 'http://localhost:8080/';
+  static const String baseUrl ='http://192.168.100.18:8080/';
   static const String _tokenKey = 'jwt_token';
   static const String _userRoleKey = 'user_role';
   static const String _userNameKey = 'user_name';

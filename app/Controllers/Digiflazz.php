@@ -6,6 +6,7 @@ use App\Controllers\BaseController;
 use App\Models\ProviderModel;
 use App\Models\NominalModel;
 use App\Models\PenjualanPulsaModel;
+use App\Services\TopupSaldoService;
 
 class Digiflazz extends BaseController
 {
@@ -13,7 +14,6 @@ class Digiflazz extends BaseController
     private $apiKey;
     private $baseUrl;
 
-    // Daftar provider yang akan disync (whitelist)
     private $allowedBrands = [
         'TELKOMSEL', 'XL', 'INDOSAT', 'TRI', 'AXIS', 'SMARTFREN', 'by.U', 'Three'
     ];
@@ -25,69 +25,43 @@ class Digiflazz extends BaseController
         $this->baseUrl  = 'https://api.digiflazz.com/v1';
     }
 
-    /**
-     * Ambil daftar harga (price list) dari DigiFlazz
-     */
     public function priceList()
     {
         $client = \Config\Services::curlrequest();
         $sign   = md5($this->username . $this->apiKey . 'pricelist');
-
         $response = $client->post($this->baseUrl . '/price-list', [
-            'json' => [
-                'username' => $this->username,
-                'sign'     => $sign
-            ]
+            'json' => ['username' => $this->username, 'sign' => $sign]
         ]);
-
         return $this->response->setJSON(json_decode($response->getBody(), true));
     }
 
-    /**
-     * Sinkronisasi produk dari DigiFlazz ke database lokal (hanya pulsa)
-     */
     public function syncProducts()
     {
         $client = \Config\Services::curlrequest();
         $sign   = md5($this->username . $this->apiKey . 'pricelist');
-
         $response = $client->post($this->baseUrl . '/price-list', [
-            'json' => [
-                'username' => $this->username,
-                'sign'     => $sign
-            ]
+            'json' => ['username' => $this->username, 'sign' => $sign]
         ]);
-
         $result = json_decode($response->getBody(), true);
-
+        
         if (!isset($result['data']) || !is_array($result['data'])) {
-            return $this->response->setJSON([
-                'success' => false,
-                'message' => 'Gagal mengambil data dari DigiFlazz'
-            ]);
+            return $this->response->setJSON(['success' => false, 'message' => 'Gagal mengambil data dari DigiFlazz']);
         }
-
+        
         $providerModel = new ProviderModel();
         $nominalModel  = new NominalModel();
-        $synced        = 0;
-
+        $synced = 0;
+        
         foreach ($result['data'] as $product) {
-            // Pastikan product adalah array
             if (!is_array($product)) continue;
-
-            // Hanya pulsa dan brand yang diizinkan
             if (empty($product['category']) || $product['category'] !== 'Pulsa') continue;
             if (!in_array($product['brand'], $this->allowedBrands)) continue;
-
+            
             $brand = $product['brand'];
-            // Normalisasi brand (Three -> TRI, by.U -> BYU, dll)
             $normalizedBrand = $this->normalizeBrand($brand);
-
-            // Ekstrak nominal dari product_name (contoh: "XL 10.000" -> 10000)
             $nominalValue = $this->extractNominal($product['product_name']);
             if ($nominalValue === 0) continue;
-
-            // Cari atau buat provider
+            
             $provider = $providerModel->where('kode_provider', $normalizedBrand)->first();
             if (!$provider) {
                 $providerId = $providerModel->insert([
@@ -98,16 +72,13 @@ class Digiflazz extends BaseController
             } else {
                 $providerId = $provider['id'];
             }
-
-            // Cek apakah nominal sudah ada
+            
             $existing = $nominalModel->where('provider_id', $providerId)
-                ->where('nominal', $nominalValue)
-                ->first();
-
+                ->where('nominal', $nominalValue)->first();
+                
             if (!$existing) {
                 $hargaModal = isset($product['price']) ? (float) $product['price'] : 0;
-                $hargaJual  = $hargaModal + ($hargaModal * 0.05); // markup 5%
-
+                $hargaJual  = $hargaModal + ($hargaModal * 0.05);
                 if ($hargaModal > 0) {
                     $nominalModel->insert([
                         'provider_id'  => $providerId,
@@ -120,23 +91,35 @@ class Digiflazz extends BaseController
                 }
             }
         }
-
+        
         return $this->response->setJSON([
             'success' => true,
             'message' => "Sinkronisasi selesai. $synced produk baru ditambahkan."
         ]);
     }
 
-    /**
-     * Topup pulsa
-     */
     public function topup()
     {
-        $rules = [
-            'buyer_sku_code' => 'required',
-            'customer_no'    => 'required|numeric|min_length[10]|max_length[15]',
-        ];
-
+        $metodePayment = $this->request->getPost('metode_pembayaran') ?? 'tunai';
+        
+        // 🔥 Validasi berbeda berdasarkan metode pembayaran
+        if ($metodePayment === 'saldo') {
+            // Untuk SALDO, buyer_sku_code tidak wajib
+            $rules = [
+                'customer_no'    => 'required|numeric|min_length[10]|max_length[15]',
+                'nominal_id'     => 'required|integer',
+                'harga_jual'     => 'required|numeric',
+                'metode_pembayaran' => 'required|in_list[tunai,saldo,transfer,grip]'
+            ];
+        } else {
+            // Untuk metode lain, buyer_sku_code wajib
+            $rules = [
+                'buyer_sku_code' => 'required',
+                'customer_no'    => 'required|numeric|min_length[10]|max_length[15]',
+                'metode_pembayaran' => 'required|in_list[tunai,saldo,transfer,grip]'
+            ];
+        }
+        
         if (!$this->validate($rules)) {
             return $this->response->setJSON([
                 'success' => false,
@@ -145,51 +128,148 @@ class Digiflazz extends BaseController
             ]);
         }
 
-        $client = \Config\Services::curlrequest();
+        $hargaJual = (float) $this->request->getPost('harga_jual') ?? 0;
+        $nominalId = (int) $this->request->getPost('nominal_id') ?? 0;
+        $customerNo = $this->request->getPost('customer_no');
 
+        // 🔥 Ambil user_id dari JWT payload
+        $userId = $this->request->user->user_id ?? null;
+        
+        if (!$userId) {
+            return $this->response->setStatusCode(401)->setJSON([
+                'success' => false,
+                'message' => 'User tidak terautentikasi'
+            ]);
+        }
+
+        // 🔥 Jika metode SALDO (simulasi internal, tanpa panggil Digiflazz)
+        if ($metodePayment === 'saldo') {
+            $topupSaldoService = new TopupSaldoService();
+            
+            // Cek saldo cukup tidak
+            $cekSaldo = $topupSaldoService->getSaldo($userId);
+            
+            if ($cekSaldo < $hargaJual) {
+                return $this->response->setStatusCode(400)->setJSON([
+                    'success' => false,
+                    'message' => 'Saldo tidak mencukupi. Saldo Anda: Rp ' . number_format($cekSaldo, 0, ',', '.')
+                ]);
+            }
+            
+            // Kurangi saldo
+            $hasilKurangi = $topupSaldoService->kurangiSaldoUntukPulsa($userId, $hargaJual);
+            
+            if (!$hasilKurangi['success']) {
+                return $this->response->setStatusCode(400)->setJSON([
+                    'success' => false,
+                    'message' => $hasilKurangi['message']
+                ]);
+            }
+            
+            $refId = 'INV-' . time() . '-' . rand(100, 999);
+            $status = 'sukses';
+            $message = 'Transaksi sukses (simulasi saldo)';
+            $price = $hargaJual;
+
+            // Catat transaksi ke tbl_penjualan_pulsa
+            $penjualanPulsa = new PenjualanPulsaModel();
+            // Cari provider_id dari nominal_id
+            $nominalModel = new NominalModel();
+            $nominal = $nominalModel->find($nominalId);
+            $providerId = $nominal ? $nominal['provider_id'] : 0;
+            
+            $insertData = [
+                'no_transaksi'       => $refId,
+                'no_tujuan'          => $customerNo,
+                'provider_id'        => $providerId,
+                'nominal_id'         => $nominalId,
+                'nominal'            => $price,
+                'harga_modal'        => $price,
+                'harga_jual'         => $hargaJual,
+                'keuntungan'         => 0,
+                'metode_pembayaran'  => $metodePayment,
+                'status'             => $status,
+                'api_ref'            => $refId,
+                'created_by'         => $userId
+            ];
+            $penjualanPulsa->insert($insertData);
+
+            // Catat history topup pulsa
+            $topupSaldoService->catatHistoryTopupPulsa(
+                $userId,
+                $hargaJual,
+                $customerNo,
+                'SALDO',
+                $metodePayment,
+                $status
+            );
+
+            // Ambil saldo terbaru untuk response
+            $saldoBaru = $topupSaldoService->getSaldo($userId);
+
+            return $this->response->setJSON([
+                'success' => true,
+                'message' => $message,
+                'data' => [
+                    'status' => $status,
+                    'message' => $message,
+                    'price' => $price,
+                    'ref_id' => $refId,
+                    'saldo_baru' => $saldoBaru
+                ]
+            ]);
+        }
+
+        // ============================================================
+        // Untuk metode lain (tunai, transfer) panggil DigiFlazz
+        // ============================================================
+        $buyerSkuCode = $this->request->getPost('buyer_sku_code');
+        $testing = $this->request->getPost('testing') ?? true;
+        
+        $client = \Config\Services::curlrequest();
         $refId = 'INV-' . time() . '-' . rand(100, 999);
         $sign  = md5($this->username . $this->apiKey . $refId);
-
+        
         $payload = [
             'username'        => $this->username,
-            'buyer_sku_code'  => $this->request->getPost('buyer_sku_code'),
-            'customer_no'     => $this->request->getPost('customer_no'),
+            'buyer_sku_code'  => $buyerSkuCode,
+            'customer_no'     => $customerNo,
             'ref_id'          => $refId,
             'sign'            => $sign
         ];
-
-        $testing = $this->request->getPost('testing') ?? true;
+        
         if ($testing) {
             $payload['testing'] = true;
         }
 
-        $response = $client->post($this->baseUrl . '/transaction', [
-            'json' => $payload
-        ]);
-
+        $response = $client->post($this->baseUrl . '/transaction', ['json' => $payload]);
         $result = json_decode($response->getBody(), true);
 
         // Simpan ke database
         if (isset($result['data']) && is_array($result['data'])) {
             $data = $result['data'];
             $penjualanPulsa = new PenjualanPulsaModel();
-
-            // Dapatkan provider_id dari buyer_sku_code (coba cek database dulu)
-            $providerId = $this->getProviderIdBySku($this->request->getPost('buyer_sku_code'));
-
+            $nominalModel = new NominalModel();
+            $nominal = $nominalModel->find($nominalId);
+            $providerId = $nominal ? $nominal['provider_id'] : 0;
+            
+            $apiStatus = isset($data['status']) ? strtolower($data['status']) : 'proses';
+            $validStatus = in_array($apiStatus, ['proses', 'sukses', 'gagal']) ? $apiStatus : 'proses';
+            
             $insertData = [
                 'no_transaksi'       => $refId,
-                'no_tujuan'          => $this->request->getPost('customer_no'),
+                'no_tujuan'          => $customerNo,
                 'provider_id'        => $providerId,
-                'nominal_id'         => 0,
+                'nominal_id'         => $nominalId,
                 'nominal'            => $data['price'] ?? 0,
                 'harga_modal'        => $data['price'] ?? 0,
-                'harga_jual'         => $this->request->getPost('harga_jual') ?? ($data['price'] ?? 0),
-                'keuntungan'         => ($this->request->getPost('harga_jual') ?? ($data['price'] ?? 0)) - ($data['price'] ?? 0),
-                'metode_pembayaran'  => $this->request->getPost('metode_pembayaran') ?? 'tunai',
-                'status'             => $data['status'] ?? 'pending',
+                'harga_jual'         => $hargaJual,
+                'keuntungan'         => $hargaJual - ($data['price'] ?? 0),
+                'metode_pembayaran'  => $metodePayment,
+                'status'             => $validStatus,
                 'api_ref'            => $refId,
-                'created_by'         => session()->get('user_id')
+                'api_status'         => $data['status'] ?? null,
+                'created_by'         => $userId
             ];
             $penjualanPulsa->insert($insertData);
         }
@@ -197,45 +277,21 @@ class Digiflazz extends BaseController
         return $this->response->setJSON($result);
     }
 
-    // Helper: normalisasi brand
     private function normalizeBrand($brand)
     {
         $map = [
-            'TELKOMSEL' => 'TSEL',
-            'XL'        => 'XL',
-            'INDOSAT'   => 'ISAT',
-            'TRI'       => 'TRI',
-            'Three'     => 'TRI',
-            'AXIS'      => 'AXIS',
-            'SMARTFREN' => 'SMART',
-            'by.U'      => 'BYU'
+            'TELKOMSEL' => 'TSEL', 'XL' => 'XL', 'INDOSAT' => 'ISAT',
+            'TRI' => 'TRI', 'Three' => 'TRI', 'AXIS' => 'AXIS',
+            'SMARTFREN' => 'SMART', 'by.U' => 'BYU'
         ];
         return $map[$brand] ?? strtoupper($brand);
     }
 
-    // Helper: ekstrak nominal dari nama produk
     private function extractNominal($productName)
     {
-        // Contoh: "XL 10.000" -> 10000, "Telkomsel 5.000" -> 5000
         if (preg_match('/(\d+[\.]?\d*)/', $productName, $matches)) {
-            // Hapus titik ribuan
-            $number = str_replace('.', '', $matches[1]);
-            return (int) $number;
+            return (int) str_replace('.', '', $matches[1]);
         }
         return 0;
-    }
-
-    // Helper mapping sku ke provider_id (sementara, idealnya dari database)
-    private function getProviderIdBySku($sku)
-    {
-        $map = [
-            's10' => 1, 's20' => 1, 's50' => 1, 's100' => 1,
-            'x10' => 2, 'x5'  => 2,
-            'i10' => 3, 'i5'  => 3,
-            't10' => 4, 't5'  => 4,
-            'ax10'=> 5, 'ax5' => 5,
-            'sm10'=> 6,
-        ];
-        return $map[$sku] ?? 0;
     }
 }

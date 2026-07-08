@@ -14,7 +14,7 @@ class User extends Model
     protected $useSoftDelete = false;
     protected $protectFields = true;
     protected $allowedFields = ['id', 'nama_lengkap', 'username', 'password', 
-    'no_tlp', 'alamat', 'image', 'status', 'role_id', 'created_at', 'updated_at'];
+    'email', 'no_tlp', 'alamat', 'image', 'status', 'role_id', 'created_at', 'updated_at'];
 
     //tanggal
     protected $useTimestamps = true;

@@ -21,17 +21,26 @@ class Produk
         $this->satuanModel   = new Satuan();
     }
 
-    /** ============================================================
-     * GET ALL PRODUK (hanya produk fisik)
-     * ============================================================ */
-    public function getData(): array
+    // ================================================================
+    // GET ALL PRODUK DENGAN SEARCH
+    // ================================================================
+    public function getData($search = null, $limit = 100, $offset = 0): array
     {
         try {
-            $data = $this->produkModel->whereFisik()->findAllDataWithRelation();
+            $builder = $this->produkModel->whereFisik();
+
+            if (!empty($search)) {
+                $builder->like('nama_produk', $search);
+            }
+
+            $total = $builder->countAllResults(false);
+            $data  = $builder->findAllDataWithRelation($limit, $offset);
+
             return [
                 'success' => true,
                 'message' => 'Data produk berhasil diambil',
                 'data'    => $data,
+                'total'   => $total,
                 'code'    => 200,
             ];
         } catch (Exception $e) {
@@ -39,14 +48,12 @@ class Produk
                 'success' => false,
                 'message' => 'Gagal mengambil data produk: ' . $e->getMessage(),
                 'data'    => [],
+                'total'   => 0,
                 'code'    => 500,
             ];
         }
     }
 
-    /** ============================================================
-     * GET KATEGORI
-     * ============================================================ */
     public function getDataKategori(): array
     {
         try {
@@ -67,9 +74,6 @@ class Produk
         }
     }
 
-    /** ============================================================
-     * GET SATUAN
-     * ============================================================ */
     public function getDataSatuan(): array
     {
         try {
@@ -90,9 +94,6 @@ class Produk
         }
     }
 
-    /** ============================================================
-     * GET BY ID
-     * ============================================================ */
     public function getById(string $id): array
     {
         try {
@@ -123,9 +124,6 @@ class Produk
         }
     }
 
-    /** ============================================================
-     * CREATE PRODUK (hanya fisik)
-     * ============================================================ */
     public function createData(array $data): array
     {
         try {
@@ -134,11 +132,13 @@ class Produk
             $newData = [
                 'id'          => $id,
                 'nama_produk' => $data['produk'],
-                'jenis'       => 'fisik', // Selalu set sebagai fisik
+                'jenis'       => 'fisik',
                 'harga'       => $data['harga'],
                 'stok'        => $data['stok'],
                 'kategori_id' => $data['kategori'],
-                'satuan_id'   => $data['satuan'], // Satuan selalu required
+                'satuan_id'   => $data['satuan'],
+                'created_at'  => date('Y-m-d H:i:s'),
+                'updated_at'  => date('Y-m-d H:i:s'),
             ];
 
             $this->produkModel->insert($newData);
@@ -159,9 +159,6 @@ class Produk
         }
     }
 
-    /** ============================================================
-     * UPDATE PRODUK (hanya fisik)
-     * ============================================================ */
     public function updateData(string $id, array $data): array
     {
         try {
@@ -175,11 +172,11 @@ class Produk
 
             $updateData = [
                 'nama_produk' => $data['produk'],
-                'jenis'       => 'fisik', // Selalu set sebagai fisik
+                'jenis'       => 'fisik',
                 'harga'       => $data['harga'],
                 'stok'        => $data['stok'],
                 'kategori_id' => $data['kategori'],
-                'satuan_id'   => $data['satuan'], // Satuan selalu required
+                'satuan_id'   => $data['satuan'],
                 'updated_at'  => date('Y-m-d H:i:s'),
             ];
 
@@ -200,9 +197,6 @@ class Produk
         }
     }
 
-    /** ============================================================
-     * DELETE PRODUK
-     * ============================================================ */
     public function deleteData(string $id): array
     {
         try {

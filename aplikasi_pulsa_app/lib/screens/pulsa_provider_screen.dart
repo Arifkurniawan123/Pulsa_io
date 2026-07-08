@@ -67,46 +67,10 @@ class _PulsaProviderScreenState extends State<PulsaProviderScreen> {
     }
   }
 
-  void _onSidebarItemSelected(int index) async {
-    final roleId = await _api.getUserRole();
-    switch (index) {
-      case 0:
-        if (roleId == 2) Navigator.pushReplacementNamed(context, '/dashboard');
-        else Navigator.pushReplacementNamed(context, '/kasir');
-        break;
-      case 1:
-        // sudah di halaman ini
-        break;
-      case 2:
-        Navigator.pushReplacementNamed(context, '/topup-saldo');
-        break;
-      case 3:
-        Navigator.pushReplacementNamed(context, '/scan-pulsa');
-        break;
-      case 4:
-        if (roleId == 2) {
-          Navigator.pushReplacementNamed(context, '/user');
-        } else {
-          Navigator.pushReplacementNamed(context, '/history');
-        }
-        break;
-      case 5:
-        if (roleId == 2) {
-          Navigator.pushReplacementNamed(context, '/history');
-        }
-        break;
-      default:
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Fitur belum tersedia')),
-        );
-    }
-  }
-  @override
+@override
   Widget build(BuildContext context) {
-    const selectedIndex = 1;
-
     return Scaffold(
-      drawer: CustomSidebar(selectedIndex: selectedIndex, onItemSelected: _onSidebarItemSelected),
+      drawer: const CustomSidebar(currentRoute: '/pulsa-provider'),
       appBar: AppBar(title: const Text('Pilih Provider Pulsa')),
       body: RefreshIndicator(
         onRefresh: _fetchProviders,

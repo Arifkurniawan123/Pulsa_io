@@ -49,11 +49,16 @@ class _LoginScreenState extends State<LoginScreen> {
         await _api.saveToken(token);
         await _api.saveUserInfo(user);
 
-        final roleId = user['role_id'] is int ? user['role_id'] : int.tryParse(user['role_id']?.toString() ?? '') ?? 0;
-        final routeName = roleId == 2 ? '/dashboard' : '/kasir';
+        final roleId = user['role_id'] is int
+            ? user['role_id'] as int
+            : int.tryParse(user['role_id']?.toString() ?? '') ?? 0;
 
         if (mounted) {
-          Navigator.pushReplacementNamed(context, routeName);
+          if (roleId == 2) {
+            Navigator.pushReplacementNamed(context, '/dashboard');
+          } else {
+            Navigator.pushReplacementNamed(context, '/pulsa-provider');
+          }
         }
       } else {
         setState(() => _error = response.data['message'] ?? 'Login gagal');

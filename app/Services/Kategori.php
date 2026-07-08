@@ -7,31 +7,39 @@ use App\Models\Kategori as ModelsKategori;
 class Kategori
 {
     protected $kategoriModel;
+    
     public function __construct()
     {
         $this->kategoriModel = new ModelsKategori();
     }
 
-    public function getData()
+    // ================================================================
+    // GET DATA WITH SEARCH
+    // ================================================================
+    public function getData($search = null, $limit = 100, $offset = 0)
     {
         try {
-            $data = $this->kategoriModel->findAll();
-            if (empty($data)) {
-                return [
-                    'success' => true,
-                    'data'    => [],
-                ];
+            $builder = $this->kategoriModel;
+
+            if (!empty($search)) {
+                $builder->like('nama_kategori', $search);
             }
+
+            $total = $builder->countAllResults(false);
+            $data  = $builder->orderBy('id', 'DESC')
+                             ->findAll($limit, $offset);
 
             return [
                 'success' => true,
                 'data'    => $data,
+                'total'   => $total,
             ];
         } catch (\Throwable $th) {
             log_message('error', $th->getMessage());
             return [
                 'success' => false,
                 'data'    => [],
+                'total'   => 0,
             ];
         }
     }
@@ -67,6 +75,7 @@ class Kategori
     {
         $newData = [
             'nama_kategori' => $data['kategori'],
+            'created_at'    => date('Y-m-d H:i:s'),
         ];
 
         try {
@@ -102,7 +111,7 @@ class Kategori
 
         $newData = [
             'nama_kategori' => $data['kategori'],
-            'updated_at'  => date('Y-m-d H:i:s'),
+            'updated_at'    => date('Y-m-d H:i:s'),
         ];
 
         try {

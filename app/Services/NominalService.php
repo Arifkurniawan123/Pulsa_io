@@ -20,11 +20,25 @@ class NominalService
     }
 
     /**
-     * Get all nominals with provider data
+     * Get all nominals dengan filter (TANPA JOIN PROVIDER)
      */
     public function getAll($filters = [])
     {
-        return $this->nominalModel->getWithProvider($filters);
+        $builder = $this->nominalModel;
+
+        if (!empty($filters['search'])) {
+            $builder->like('nominal', $filters['search']);
+        }
+
+        if (!empty($filters['provider_id'])) {
+            $builder->where('provider_id', $filters['provider_id']);
+        }
+
+        if (!empty($filters['status']) && $filters['status'] !== 'all') {
+            $builder->where('status', $filters['status']);
+        }
+
+        return $builder->orderBy('created_at', 'DESC')->findAll();
     }
 
     /**
@@ -52,30 +66,25 @@ class NominalService
     }
 
     /**
-     * Create new nominal - PERBAIKAN: Sesuaikan dengan struktur database
+     * Create new nominal
      */
     public function create($data)
     {
         try {
-            // Validasi provider exists
             if (!$this->providerModel->find($data['provider_id'])) {
                 throw new \Exception('Provider tidak valid');
             }
 
-            // Convert to integers - PERBAIKAN: hanya field yang ada di database
             $insertData = [
                 'provider_id' => (int) $data['provider_id'],
-                'nominal' => (int) $data['nominal'],
+                'nominal'     => (int) $data['nominal'],
                 'harga_modal' => (int) $data['harga_modal'],
-                'harga_jual' => (int) $data['harga_jual'],
-                'status' => $data['status']
+                'harga_jual'  => (int) $data['harga_jual'],
+                'status'      => $data['status']
             ];
-            
-            // PERBAIKAN: Hapus keuntungan karena tidak ada di database
-            
-            // Insert dan return result
+
             $result = $this->nominalModel->insert($insertData);
-            
+
             if ($result) {
                 return $result;
             } else {
@@ -88,30 +97,25 @@ class NominalService
     }
 
     /**
-     * Update nominal - PERBAIKAN: Sesuaikan dengan struktur database
+     * Update nominal
      */
     public function update($id, $data)
     {
         try {
-            // Validasi provider exists
             if (!$this->providerModel->find($data['provider_id'])) {
                 throw new \Exception('Provider tidak valid');
             }
 
-            // Convert to integers - PERBAIKAN: hanya field yang ada di database
             $updateData = [
                 'provider_id' => (int) $data['provider_id'],
-                'nominal' => (int) $data['nominal'],
+                'nominal'     => (int) $data['nominal'],
                 'harga_modal' => (int) $data['harga_modal'],
-                'harga_jual' => (int) $data['harga_jual'],
-                'status' => $data['status']
+                'harga_jual'  => (int) $data['harga_jual'],
+                'status'      => $data['status']
             ];
-            
-            // PERBAIKAN: Hapus keuntungan karena tidak ada di database
-            
-            // Update dan return result
+
             $result = $this->nominalModel->update($id, $updateData);
-            
+
             if ($result) {
                 return true;
             } else {
@@ -129,7 +133,6 @@ class NominalService
     public function deleteData($id)
     {
         try {
-            // Cek apakah nominal exists
             if (!$this->nominalModel->find($id)) {
                 return [
                     'success' => false,
@@ -138,7 +141,6 @@ class NominalService
                 ];
             }
 
-            // HARD DELETE (permanen dari database)
             $result = $this->nominalModel->delete($id);
 
             if ($result) {
@@ -155,7 +157,6 @@ class NominalService
                 ];
             }
         } catch (\Exception $e) {
-            // Handle foreign key constraint error
             if (strpos($e->getMessage(), 'foreign key constraint') !== false) {
                 return [
                     'success' => false,
@@ -163,7 +164,7 @@ class NominalService
                     'code'    => 409,
                 ];
             }
-            
+
             return [
                 'success' => false,
                 'message' => 'Gagal menghapus data nominal: ' . $e->getMessage(),
@@ -208,8 +209,8 @@ class NominalService
     public function getStats()
     {
         return [
-            'total' => $this->nominalModel->countAll(),
-            'active' => $this->nominalModel->where('status', 'active')->countAllResults(),
+            'total'    => $this->nominalModel->countAll(),
+            'active'   => $this->nominalModel->where('status', 'active')->countAllResults(),
             'inactive' => $this->nominalModel->where('status', 'inactive')->countAllResults()
         ];
     }
